@@ -6,9 +6,10 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH=/app
 ENV PIP_NO_CACHE_DIR=1
-
+ENV HF_HOME=/app/.cache/huggingface
 # Créer un utilisateur non-root
 RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN mkdir -p /home/appuser/.cache && chown -R appuser:appuser /home/appuser
 
 # Installer les dépendances système nécessaires pour ML/PyTorch
 RUN apt-get update && apt-get install -y \
