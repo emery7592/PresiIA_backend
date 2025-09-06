@@ -1,129 +1,111 @@
 # =============================================================================
 # VARAIN BACKEND - REQUIREMENTS.TXT
 # =============================================================================
-# Fichier généré automatiquement avec toutes les dépendances nécessaires
+# Fichier optimisé avec toutes les dépendances nécessaires
 # pour le projet Varain Backend (FastAPI + PostgreSQL + Stripe + OpenAI + RAG)
 # =============================================================================
 
 # =============================================================================
 # WEB FRAMEWORK & API
 # =============================================================================
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
-starlette==0.41.5
-pydantic==2.10.3
-pydantic[email]==2.10.3
-python-multipart==0.0.12
+fastapi>=0.104.0,<0.116.0
+uvicorn[standard]>=0.24.0,<0.33.0
+pydantic[email]>=2.5.0,<2.11.0
+python-multipart>=0.0.6
 
 # =============================================================================
 # DATABASE & ORM
 # =============================================================================
-sqlalchemy==2.0.36
-psycopg2-binary==2.9.10
-alembic==1.14.0
+sqlalchemy>=2.0.0,<2.1.0
+psycopg2-binary>=2.9.0,<3.0.0
+alembic>=1.13.0,<2.0.0
 
 # =============================================================================
 # AUTHENTICATION & SECURITY
 # =============================================================================
-passlib[bcrypt]==1.7.4
-python-jose[cryptography]==3.3.0
-python-dotenv==1.0.1
-email-validator==2.2.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+python-jose[cryptography]>=3.3.0,<4.0.0
+python-dotenv>=1.0.0,<2.0.0
+email-validator>=2.1.0,<3.0.0
 
 # =============================================================================
 # PAYMENT PROCESSING
 # =============================================================================
-stripe==10.15.0
+stripe>=7.0.0,<11.0.0
 
 # =============================================================================
-# AI & MACHINE LEARNING
+# AI & MACHINE LEARNING (Optimisé pour serveur 1GB)
 # =============================================================================
-openai==1.58.1
-sentence-transformers==3.3.1
-faiss-cpu==1.8.0
-transformers==4.46.3
-torch==2.5.1
-numpy==2.2.0
-tiktoken==0.8.0
+openai>=1.30.0,<2.0.0
+# sentence-transformers>=2.2.0,<4.0.0  # Commenté temporairement (RAM)
+# faiss-cpu>=1.7.0,<2.0.0  # Commenté temporairement (RAM)
+# transformers>=4.30.0,<5.0.0  # Commenté temporairement (RAM)
+# torch>=2.0.0,<3.0.0  # Commenté temporairement (RAM)
+numpy>=1.24.0,<2.0.0
+tiktoken>=0.5.0,<1.0.0
 
 # =============================================================================
-# AUDIO & VIDEO PROCESSING
+# AUDIO & VIDEO PROCESSING (Optionnel)
 # =============================================================================
-openai-whisper==20240930
-moviepy==1.0.3
-pydub==0.25.1
+# openai-whisper>=20231117  # Commenté temporairement (RAM)
+# moviepy>=1.0.0,<2.0.0  # Commenté temporairement (RAM)
+# pydub>=0.25.0,<1.0.0  # Commenté temporairement (RAM)
 
 # =============================================================================
 # DOCUMENT PROCESSING
 # =============================================================================
-pypdf==5.1.0
-reportlab==4.2.5
+pypdf>=3.0.0,<6.0.0
+reportlab>=4.0.0,<5.0.0
 
 # =============================================================================
-# WEB INTERFACE
+# WEB INTERFACE (Optionnel)
 # =============================================================================
-gradio==5.7.0
+# gradio>=4.0.0,<6.0.0  # Commenté temporairement (RAM)
 
 # =============================================================================
 # HTTP & REQUESTS
 # =============================================================================
-httpx==0.28.1
-requests==2.32.3
-aiofiles==24.1.0
+httpx>=0.25.0,<1.0.0
+requests>=2.31.0,<3.0.0
+aiofiles>=23.0.0,<25.0.0
 
 # =============================================================================
 # DATA PROCESSING
 # =============================================================================
-pandas==2.2.3
-python-dateutil==2.9.0
+pandas>=2.0.0,<3.0.0
+python-dateutil>=2.8.0,<3.0.0
 
 # =============================================================================
 # UTILITIES
 # =============================================================================
-click==8.1.7
-typer==0.12.8
-rich==13.9.4
-tqdm==4.67.1
+click>=8.0.0,<9.0.0
+# typer>=0.9.0,<1.0.0  # Optionnel
+# rich>=13.0.0,<14.0.0  # Optionnel
+# tqdm>=4.65.0,<5.0.0  # Optionnel
 
 # =============================================================================
-# DEVELOPMENT & TESTING
+# DEVELOPMENT & TESTING (Optionnel)
 # =============================================================================
-pytest==8.3.4
-pytest-asyncio==0.24.0
-httpx==0.28.1
+# pytest>=7.4.0,<9.0.0
+# pytest-asyncio>=0.21.0,<1.0.0
 
 # =============================================================================
 # SERVER & DEPLOYMENT
 # =============================================================================
-waitress==3.0.0
-gunicorn==23.0.0
-
-# =============================================================================
-# OPTIONAL DEPENDENCIES (pour compatibilité)
-# =============================================================================
-# Ces packages peuvent être nécessaires selon l'environnement
-certifi==2024.10.15
-charset-normalizer==3.4.0
-idna==3.10
-urllib3==2.2.3
-packaging==24.2
-typing-extensions==4.12.2
+waitress>=2.1.0,<4.0.0
+gunicorn>=21.0.0,<24.0.0
 
 # =============================================================================
 # NOTES D'INSTALLATION
 # =============================================================================
 # 1. Installation: pip install -r requirements.txt
-# 2. Pour PostgreSQL: Assurez-vous que PostgreSQL est installé
-# 3. Pour Whisper: Peut nécessiter ffmpeg selon l'OS
-# 4. Pour FAISS: Utilise faiss-gpu si vous avez une GPU NVIDIA
-# 5. Variables d'environnement requises dans .env:
+# 2. Pour activer les fonctionnalités ML (après upgrade RAM):
+#    Décommentez les lignes sentence-transformers, faiss-cpu, etc.
+# 3. Variables d'environnement requises dans .env:
 #    - DATABASE_URL
-#    - SECRET_KEY
+#    - JWT_SECRET_KEY
 #    - STRIPE_SECRET_KEY
-#    - STRIPE_PUBLIC_KEY
 #    - STRIPE_WEBHOOK_SECRET
 #    - STRIPE_PRICE_ID
-#    - OPENAI_API_KEY
-#    - PUSHOVER_USER (optionnel)
-#    - PUSHOVER_TOKEN (optionnel)
+#    - OPENAI_API_KEY (optionnel)
 # =============================================================================
