@@ -1,18 +1,13 @@
-# Dockerfile
 FROM python:3.13-slim
 
-# Variables d'environnement pour Python
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH=/app
 ENV PIP_NO_CACHE_DIR=1
 ENV HF_HOME=/app/.cache/huggingface
-# Créer un utilisateur non-root
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-RUN mkdir -p /home/appuser/.cache && chown -R appuser:appuser /home/appuser
+ENV TRANSFORMERS_CACHE=/app/.cache/transformers
 
-
-# Installer les dépendances système nécessaires pour ML/PyTorch
+# Installer les dépendances système nécessaires
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -31,34 +26,31 @@ RUN apt-get update && apt-get install -y \
 # Définir le répertoire de travail
 WORKDIR /app
 
-# Copier et installer les dépendances Python
+# Copier et installer les dépendances Python EN TANT QUE ROOT
 COPY requirements.txt .
-
-# Mise à jour de pip et installation des dépendances
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copier le code de l'application
+# Copier le code de l'application EN TANT QUE ROOT
 COPY . .
 
-# Créer les répertoires nécessaires
-RUN mkdir -p /app/logs /app/uploads
+# Créer l'utilisateur APRÈS avoir copié les fichiers
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Créer les répertoires nécessaires
-RUN mkdir -p /app/logs /app/uploads /app/.cache/huggingface
+# Créer les répertoires nécessaires et DONNER TOUTES LES PERMISSIONS À LA FIN
+RUN mkdir -p /app/logs /app/uploads /app/.cache/huggingface /app/.cache/transformers /home/appuser
+RUN chown -R appuser:appuser /app /home/appuser
+RUN chmod -R 755 /app
 
-# Changer la propriété des fichiers
-RUN chown -R appuser:appuser /app
-
-# Basculer vers l'utilisateur non-root
+# Basculer vers l'utilisateur non-root SEULEMENT À LA FIN
 USER appuser
 
 # Exposer le port
 EXPOSE 7860
 
-# Healthcheck amélioré
+# Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
-    CMD curl -f http://localhost:7860/ || exit 1
+    CMD curl -f http://localhost:7860/api/health || exit 1
 
-# ✅ CORRECTION : main:app au lieu de app.main:app
+# Commande de démarrage
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
