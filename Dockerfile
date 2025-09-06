@@ -11,6 +11,7 @@ ENV HF_HOME=/app/.cache/huggingface
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 RUN mkdir -p /home/appuser/.cache && chown -R appuser:appuser /home/appuser
 
+
 # Installer les dépendances système nécessaires pour ML/PyTorch
 RUN apt-get update && apt-get install -y \
     gcc \
@@ -42,6 +43,9 @@ COPY . .
 
 # Créer les répertoires nécessaires
 RUN mkdir -p /app/logs /app/uploads
+
+# Créer les répertoires nécessaires
+RUN mkdir -p /app/logs /app/uploads /app/.cache/huggingface
 
 # Changer la propriété des fichiers
 RUN chown -R appuser:appuser /app
