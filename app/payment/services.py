@@ -229,7 +229,7 @@ def validate_and_create_user(db: Session, payment_data: Dict[str, Any]) -> Dict[
             amount=9.99,
             currency="eur",
             status=PaymentStatusEnum.completed,
-            metadata=f'{{"email": "{payment_data["email"]}", "first_name": "{payment_data["firstName"]}", "last_name": "{payment_data["lastName"]}"}}'
+            meta_data=f'{{"email": "{payment_data["email"]}", "first_name": "{payment_data["firstName"]}", "last_name": "{payment_data["lastName"]}"}}'
         )
         db.add(payment)
         
