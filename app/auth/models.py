@@ -1,4 +1,4 @@
-# Tes imports existants
+# Imports nécessaires
 from sqlalchemy import Column, String, Integer, Boolean, DateTime, Enum, Numeric, ForeignKey, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -7,12 +7,12 @@ from app.database.database import Base
 import uuid
 import enum
 
-# Tes enums existants
+# Enums existants
 class PlatformEnum(str, enum.Enum):
     ios = "ios"
     android = "android"
 
-# ENUMS pour les paiements
+# Enums pour les paiements
 class SubscriptionStatusEnum(str, enum.Enum):
     active = "active"
     inactive = "inactive"
@@ -25,11 +25,11 @@ class PaymentStatusEnum(str, enum.Enum):
     failed = "failed"
     canceled = "canceled"
 
-# Ta classe User existante MODIFIÉE
+# Classe User modifiée
 class User(Base):
     __tablename__ = "users"
     
-    # Tes colonnes existantes
+    # Colonnes existantes
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, nullable=True)
     password_hash = Column(String(255), nullable=True)
@@ -42,14 +42,14 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    # NOUVELLE COLONNE pour Stripe
+    # Nouvelle colonne pour Stripe
     stripe_customer_id = Column(String(255), nullable=True)
     
-    # NOUVELLES RELATIONS
+    # Relations
     subscriptions = relationship("Subscription", back_populates="user")
     payments = relationship("Payment", back_populates="user")
 
-# CLASSES pour les paiements
+# Classe Subscription
 class Subscription(Base):
     __tablename__ = "subscriptions"
     
@@ -69,6 +69,7 @@ class Subscription(Base):
     user = relationship("User", back_populates="subscriptions")
     payments = relationship("Payment", back_populates="subscription")
 
+# Classe Payment corrigée
 class Payment(Base):
     __tablename__ = "payments"
     
@@ -82,8 +83,7 @@ class Payment(Base):
     status = Column(Enum(PaymentStatusEnum), default=PaymentStatusEnum.pending)
     payment_method_id = Column(String(255), nullable=True)
     failure_reason = Column(String(500), nullable=True)
-    # CORRECTION: renommer metadata en meta_data
-    meta_data = Column(JSON, nullable=True)
+    meta_data = Column(JSON, nullable=True)  # CORRIGÉ: metadata -> meta_data
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
