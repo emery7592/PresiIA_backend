@@ -26,26 +26,19 @@ app.include_router(chat_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(payment_router, prefix="/api")  # IMPORTANT: cette ligne
 
-#@app.get("/")
-#def read_root():
-#    return {
-#        "message": "Backend redpill app is running",
-#        "docs": "/docs", 
-#        "gradio": "/gradio",
-#        "status": "healthy"
-#    }
-
-#@app.get("/health")
-#def health_check():
-#    return {"status": "healthy", "service": "redpill-api"}
-
 @app.get("/")
 def read_root():
-    return {"message": "Varain Backend API fonctionnel"}
+    return {
+        "message": "Backend redpill app is running",
+        "docs": "/docs", 
+        "gradio": "/gradio",
+        "status": "healthy"
+    }
 
-@app.get("/api/health")
+@app.get("/health")
 def health_check():
-    return {"status": "ok", "message": "API running"}
+    return {"status": "healthy", "service": "redpill-api"}
+
 
 # Interface Gradio
 demo = gr.ChatInterface(gradio_chat, type="messages")
