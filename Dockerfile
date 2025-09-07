@@ -44,9 +44,10 @@ COPY . .
 RUN mkdir -p /app/logs /app/uploads /app/.cache/huggingface /app/.cache/transformers /home/appuser
 
 # CORRECTION: Donner les bonnes permissions
+RUN chmod -R 777 /app/.cache
 RUN chown -R appuser:appuser /app /home/appuser
 RUN chmod -R 755 /app
-RUN chmod +x /app  # S'assurer que le répertoire est exécutable
+RUN chmod +x /app # S'assurer que le répertoire est exécutable
 
 # Basculer vers l'utilisateur non-root
 USER appuser
