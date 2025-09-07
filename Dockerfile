@@ -40,24 +40,24 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copier le code de l'application
 COPY . .
 
-# Créer les répertoires nécessaires
+# Créer les répertoires nécessaires AVANT de changer d'utilisateur
 RUN mkdir -p /app/logs /app/uploads /app/.cache/huggingface /app/.cache/transformers /home/appuser
-
-# CORRECTION: Donner les bonnes permissions
 RUN chmod -R 777 /app/.cache
+
+# CORRECTION: Donner les bonnes permissions APRÈS création des répertoires
 RUN chown -R appuser:appuser /app /home/appuser
 RUN chmod -R 755 /app
-RUN chmod +x /app # S'assurer que le répertoire est exécutable
+RUN chmod +x /app
 
-# Basculer vers l'utilisateur non-root
+# Basculer vers l'utilisateur non-root APRÈS toutes les opérations root
 USER appuser
 
-# Exposer le port (garder 7860 comme dans votre original)
+# Exposer le port
 EXPOSE 7860
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD curl -f http://localhost:7860/api/health || exit 1
 
-# Commande de démarrage avec un seul worker pour économiser la RAM
+# Commande de démarrage
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
