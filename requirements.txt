@@ -37,19 +37,19 @@ stripe>=7.0.0,<11.0.0
 # AI & MACHINE LEARNING (Optimisé pour serveur 1GB)
 # =============================================================================
 openai>=1.30.0,<2.0.0
-# sentence-transformers>=2.2.0,<4.0.0  # Commenté temporairement (RAM)
-# faiss-cpu>=1.7.0,<2.0.0  # Commenté temporairement (RAM)
-# transformers>=4.30.0,<5.0.0  # Commenté temporairement (RAM)
-# torch>=2.0.0,<3.0.0  # Commenté temporairement (RAM)
+sentence-transformers>=2.2.0,<4.0.0  # Commenté temporairement (RAM)
+faiss-cpu>=1.7.0,<2.0.0  # Commenté temporairement (RAM)
+transformers>=4.30.0,<5.0.0  # Commenté temporairement (RAM)
+torch>=2.0.0,<3.0.0  # Commenté temporairement (RAM)
 numpy>=1.24.0,<2.0.0
 tiktoken>=0.5.0,<1.0.0
 
 # =============================================================================
 # AUDIO & VIDEO PROCESSING (Optionnel)
 # =============================================================================
-# openai-whisper>=20231117  # Commenté temporairement (RAM)
-# moviepy>=1.0.0,<2.0.0  # Commenté temporairement (RAM)
-# pydub>=0.25.0,<1.0.0  # Commenté temporairement (RAM)
+openai-whisper>=20231117  # Commenté temporairement (RAM)
+ moviepy>=1.0.0,<2.0.0  # Commenté temporairement (RAM)
+pydub>=0.25.0,<1.0.0  # Commenté temporairement (RAM)
 
 # =============================================================================
 # DOCUMENT PROCESSING
@@ -60,7 +60,7 @@ reportlab>=4.0.0,<5.0.0
 # =============================================================================
 # WEB INTERFACE (Optionnel)
 # =============================================================================
-# gradio>=4.0.0,<6.0.0  # Commenté temporairement (RAM)
+gradio>=4.0.0,<6.0.0  # Commenté temporairement (RAM)
 
 # =============================================================================
 # HTTP & REQUESTS
