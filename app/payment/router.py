@@ -7,7 +7,7 @@ import os
 from app.database.database import get_database
 from app.payment.schemas import (
     PaymentIntentRequest, 
-    PaymentConfirmationRequest, 
+    PaymentConfirmRequest, 
     PaymentIntentResponse, 
     SubscriptionResponse
 )

@@ -10,7 +10,7 @@ class UserRegister(BaseModel):
     password: str
     device_id: str
     platform: str
-
+    
     @field_validator('password')
     @classmethod
     def validate_password(cls, v):
@@ -38,15 +38,6 @@ class PaymentIntentResponse(BaseModel):
     client_secret: Optional[str] = None
     error: Optional[str] = None
     message: str
-
-class PaymentConfirmationRequest(BaseModel):
-    payment_intent_id: str
-    firstName: str
-    lastName: str
-    email: EmailStr
-    password: str
-    device_id: str
-    platform: str
 
 class PaymentConfirmRequest(BaseModel):
     payment_intent_id: str
