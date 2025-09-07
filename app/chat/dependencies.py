@@ -178,9 +178,9 @@ def initialize_rag():
     return rag
 
 # Initialisation globale
-RAG_SYSTEM = initialize_rag()
+#RAG_SYSTEM = initialize_rag()
 #désactivé pour le moment
-#RAG_SYSTEM = None
+RAG_SYSTEM = None
 # ── Fonction de prompt intelligent ─────────────────────────────────────────────
 
 def get_system_prompt(user_query: str = "") -> str:
