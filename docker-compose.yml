@@ -48,6 +48,7 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
       - ./ssl:/etc/ssl/certs  # Pour HTTPS
+      - /dev/null:/etc/nginx/conf.d/default.conf
     depends_on:
       - app
     restart: unless-stopped
