@@ -65,3 +65,14 @@ async def chat_endpoint(request: ChatRequest):
         print(f"Erreur dans chat_endpoint: {e}")
         # En cas d'erreur, retourner un message d'erreur mais ne pas planter
         return ChatResponse(assistant="Désolé, je ne parviens pas à répondre pour l'instant.")
+
+@router.get("/health")
+async def chat_health_check():
+    """
+    Vérification de la santé du module de chat
+    """
+    return {
+        "status": "healthy",
+        "module": "chat",
+        "service": "chat-api"
+    }
