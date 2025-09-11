@@ -8,7 +8,8 @@ from app.database.database import get_database
 from app.payment.schemas import (
     PaymentIntentRequest, 
     PaymentConfirmRequest, 
-    PaymentIntentResponse, 
+    PaymentIntentResponse,
+    PaymentConfirmationResponse,
     SubscriptionResponse
 )
 from app.auth.dependencies import require_auth
@@ -37,9 +38,10 @@ async def create_payment_intent(
         # Vérifier si l'email existe déjà
         existing_user = db.query(User).filter(User.email == request.email).first()
         if existing_user and existing_user.is_registered:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Un utilisateur avec cet email existe déjà"
+            return PaymentIntentResponse(
+                success=False,
+                error="Un utilisateur avec cet email existe déjà",
+                message="Email déjà utilisé"
             )
         
         # Créer le PaymentIntent
@@ -54,18 +56,21 @@ async def create_payment_intent(
         result = create_payment_intent_service(db, user_data)
         
         return PaymentIntentResponse(
+            success=True,
             client_secret=result["client_secret"],
-            payment_intent_id=result["payment_intent_id"]
+            payment_intent_id=result["payment_intent_id"],
+            message="PaymentIntent créé avec succès"
         )
         
     except Exception as e:
         logger.error(f"Erreur lors de la création du PaymentIntent: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors de la création du paiement: {str(e)}"
+        return PaymentIntentResponse(
+            success=False,
+            error=str(e),
+            message="Erreur lors de la création du paiement"
         )
 
-@router.post("/confirm")
+@router.post("/confirm", response_model=PaymentConfirmationResponse)
 async def confirm_payment(
     request: PaymentConfirmRequest,
     db: Session = Depends(get_database)
@@ -87,25 +92,32 @@ async def confirm_payment(
         
         result = validate_and_create_user(db, payment_data)
         
-        return {
-            "message": "Paiement confirmé et compte créé avec succès",
-            "access_token": result["access_token"],
-            "token_type": result["token_type"],
-            "user_id": result["user_id"],
-            "subscription_id": result["subscription_id"]
-        }
+        return PaymentConfirmationResponse(
+            success=True,
+            message="Paiement confirmé et compte créé avec succès",
+            access_token=result["access_token"],
+            token_type=result["token_type"],
+            user={
+                "id": result["user_id"],
+                "email": request.email,
+                "firstName": request.firstName,
+                "lastName": request.lastName
+            }
+        )
         
     except ValueError as e:
         logger.error(f"Erreur de validation: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+        return PaymentConfirmationResponse(
+            success=False,
+            error=str(e),
+            message="Erreur de validation"
         )
     except Exception as e:
         logger.error(f"Erreur lors de la confirmation du paiement: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors de la confirmation du paiement: {str(e)}"
+        return PaymentConfirmationResponse(
+            success=False,
+            error=str(e),
+            message="Erreur lors de la confirmation du paiement"
         )
 
 @router.get("/subscription", response_model=Optional[SubscriptionResponse])
