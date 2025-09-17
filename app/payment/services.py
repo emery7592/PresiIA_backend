@@ -178,7 +178,6 @@ def create_payment_intent_service(db: Session, user_data: Dict[str, Any]) -> Dic
         logger.error(f"Erreur lors de la création du PaymentIntent: {e}")
         raise e
 
-
 def validate_and_create_user(db: Session, payment_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Valide le paiement et crée l'utilisateur avec son abonnement
@@ -238,7 +237,7 @@ def validate_and_create_user(db: Session, payment_data: Dict[str, Any]) -> Dict[
         )
         db.add(subscription)
         
-        # Créer le paiement en base
+        # CORRECTION: Utiliser metadata au lieu de meta_data
         payment = Payment(
             user_id=user.id,
             subscription_id=subscription.id,
@@ -246,7 +245,7 @@ def validate_and_create_user(db: Session, payment_data: Dict[str, Any]) -> Dict[
             amount=9.99,
             currency="eur",
             status=PaymentStatusEnum.completed,
-            meta_data=f'{{"email": "{payment_data["email"]}", "first_name": "{payment_data["firstName"]}", "last_name": "{payment_data["lastName"]}"}}'
+            metadata=f'{{"email": "{payment_data["email"]}", "first_name": "{payment_data["firstName"]}", "last_name": "{payment_data["lastName"]}"}}'
         )
         db.add(payment)
         
@@ -267,7 +266,6 @@ def validate_and_create_user(db: Session, payment_data: Dict[str, Any]) -> Dict[
         db.rollback()
         logger.error(f"Erreur lors de la validation et création de l'utilisateur: {e}")
         raise e
-
 
 def get_user_subscription(db: Session, user_id: str) -> Optional[Dict[str, Any]]:
     """
