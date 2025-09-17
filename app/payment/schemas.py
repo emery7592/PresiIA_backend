@@ -80,9 +80,3 @@ class ChatRequest(BaseModel):
     language: str = "en"
     device_id: str
 
-class PaymentIntentResponse(BaseModel):
-    success: bool
-    client_secret: Optional[str] = None
-    payment_intent_id: Optional[str] = None  # Ajout de ce champ
-    error: Optional[str] = None
-    message: str
