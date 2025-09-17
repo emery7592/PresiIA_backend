@@ -186,19 +186,21 @@ def validate_and_create_user(db: Session, payment_data: Dict[str, Any]) -> Dict[
         # Confirmer le PaymentIntent
         payment_intent = StripeService.confirm_payment_intent(payment_data["payment_intent_id"])
         
-        # CORRECTION: Vérifier si l'email existe déjà sur un utilisateur INSCRIT
+        # Vérifier si l'email existe déjà sur un utilisateur INSCRIT
         existing_user = db.query(User).filter(
-            User.email == payment_data["email"],
-            User.is_registered == True  # Seulement les utilisateurs déjà inscrits
+            User.email == payment_data["email"]
+        ).filter(
+            User.is_registered == True
         ).first()
+        
         if existing_user:
             raise ValueError("Un utilisateur avec cet email est déjà inscrit")
         
-        # Essayer de récupérer l'utilisateur anonyme par device_id
+        # Essayer de récupérer l'utilisateur par device_id
         user = db.query(User).filter(User.device_id == payment_data["device_id"]).first()
         
         if user:
-            # MISE À JOUR de l'utilisateur existant (anonyme)
+            # MISE À JOUR de l'utilisateur existant
             user.email = payment_data["email"]
             user.password_hash = hash_password(payment_data["password"])
             user.first_name = payment_data["firstName"]
@@ -206,14 +208,19 @@ def validate_and_create_user(db: Session, payment_data: Dict[str, Any]) -> Dict[
             user.stripe_customer_id = payment_intent["customer_id"]
             user.is_registered = True
         else:
-            # CRÉATION d'un nouvel utilisateur si aucun device_id trouvé
+            # CRÉATION d'un nouvel utilisateur
+            from app.auth.models import PlatformEnum
+            platform_value = payment_data["platform"]
+            if isinstance(platform_value, str):
+                platform_value = PlatformEnum(platform_value)
+            
             user = User(
                 email=payment_data["email"],
                 password_hash=hash_password(payment_data["password"]),
                 first_name=payment_data["firstName"],
                 last_name=payment_data["lastName"],
                 device_id=payment_data["device_id"],
-                platform=payment_data["platform"],
+                platform=platform_value,
                 stripe_customer_id=payment_intent["customer_id"],
                 is_registered=True
             )
