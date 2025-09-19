@@ -189,3 +189,22 @@ async def payment_health_check():
         "module": "payment",
         "stripe_configured": bool(os.getenv("STRIPE_SECRET_KEY"))
     }
+
+@router.get("/status/{payment_intent_id}")
+async def check_payment_status(
+    payment_intent_id: str,
+    db: Session = Depends(get_database)
+):
+    """Vérifie si un paiement a été traité et l'utilisateur créé"""
+    try:
+        # Vérifier si le paiement existe en base
+        payment = db.query(Payment).filter(
+            Payment.stripe_payment_intent_id == payment_intent_id
+        ).first()
+        
+        if payment:
+            return {"success": True, "message": "Paiement confirmé"}
+        else:
+            return {"success": False, "message": "Paiement en attente"}
+    except Exception as e:
+        return {"success": False, "message": "Erreur vérification"}
