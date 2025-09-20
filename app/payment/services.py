@@ -14,12 +14,7 @@ from app.payment.schemas import (
 )
 from app.auth.dependencies import require_auth
 from app.auth.models import User, Payment  # AJOUT: Import Payment manquant
-from app.payment.services import (
-    create_payment_intent_service,
-    validate_and_create_user,
-    get_user_subscription,
-    handle_stripe_webhook
-)
+
 
 # Configuration du logging
 logger = logging.getLogger(__name__)
