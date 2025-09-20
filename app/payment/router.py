@@ -13,7 +13,7 @@ from app.payment.schemas import (
     SubscriptionResponse
 )
 from app.auth.dependencies import require_auth
-from app.auth.models import User
+from app.auth.models import User, Payment  # AJOUT: Import Payment manquant
 from app.payment.services import (
     create_payment_intent_service,
     validate_and_create_user,
@@ -152,13 +152,14 @@ async def get_subscription(
 @router.post("/webhook")
 async def stripe_webhook(
     request: Request,
-    stripe_signature: str = Header(None)
+    stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")  # CORRECTION: Header correct
 ):
     """
     Webhook Stripe pour synchroniser les événements de paiement
     """
     try:
         if not stripe_signature:
+            logger.error("Signature Stripe manquante dans les headers")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Signature Stripe manquante"
@@ -166,9 +167,16 @@ async def stripe_webhook(
         
         # Lire le body de la requête
         payload = await request.body()
+        logger.info(f"Webhook reçu avec signature: {stripe_signature[:20]}...")
         
-        # Traiter le webhook
-        result = handle_stripe_webhook(payload, stripe_signature)
+        # Traiter le webhook avec une session de base de données
+        db = next(get_database())
+        try:
+            result = handle_stripe_webhook(payload, stripe_signature, db)
+            db.close()
+        except Exception as e:
+            db.close()
+            raise e
         
         return {"status": "success", "event_type": result["event_type"]}
         
