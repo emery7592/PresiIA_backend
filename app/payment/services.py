@@ -1,422 +1,257 @@
-import stripe
-import os
-import logging
-from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.orm import Session
-from typing import Optional, Dict, Any
-from dotenv import load_dotenv
-import json
+from typing import Optional
+import logging
+import os
 
 from app.database.database import get_database
-from app.auth.models import User, Subscription, Payment, SubscriptionStatusEnum, PaymentStatusEnum, PlatformEnum
-from app.auth.services import hash_password, create_access_token
-
-# Charger les variables d'environnement
-load_dotenv()
-
-# Configuration Stripe
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
-STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "price_1OqXqXqXqXqXqXqXqXqXqXqX")  # Votre price ID Stripe
+from app.payment.schemas import (
+    PaymentIntentRequest, 
+    PaymentConfirmRequest, 
+    PaymentIntentResponse,
+    PaymentConfirmationResponse,
+    SubscriptionResponse
+)
+from app.auth.dependencies import require_auth
+from app.auth.models import User, Payment  # AJOUT: Import Payment manquant
+from app.payment.services import (
+    create_payment_intent_service,
+    validate_and_create_user,
+    get_user_subscription,
+    handle_stripe_webhook
+)
 
 # Configuration du logging
 logger = logging.getLogger(__name__)
 
-class StripeService:
-    """Service pour gérer les interactions avec Stripe"""
-    
-    @staticmethod
-    def create_or_get_customer(email: str, first_name: str, last_name: str) -> str:
-        """
-        Crée ou récupère un client Stripe
-        """
-        try:
-            # Vérifier si le client existe déjà
-            customers = stripe.Customer.list(email=email, limit=1)
-            
-            if customers.data:
-                customer = customers.data[0]
-                # Mettre à jour les informations si nécessaire
-                if customer.name != f"{first_name} {last_name}":
-                    stripe.Customer.modify(
-                        customer.id,
-                        name=f"{first_name} {last_name}"
-                    )
-                return customer.id
-            else:
-                # Créer un nouveau client
-                customer = stripe.Customer.create(
-                    email=email,
-                    name=f"{first_name} {last_name}",
-                    metadata={
-                        "first_name": first_name,
-                        "last_name": last_name
-                    }
-                )
-                return customer.id
-                
-        except stripe.error.StripeError as e:
-            logger.error(f"Erreur Stripe lors de la création/récupération du client: {e}")
-            raise Exception(f"Erreur lors de la création du client Stripe: {str(e)}")
-    
-    @staticmethod
-    def create_payment_intent(amount: int, currency: str = "eur", customer_id: str = None, 
-                            metadata: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Crée un PaymentIntent Stripe
-        """
-        try:
-            payment_intent_data = {
-                "amount": amount,
-                "currency": currency,
-                "automatic_payment_methods": {
-                    "enabled": True,
-                },
-                "metadata": metadata or {}
-            }
-            
-            if customer_id:
-                payment_intent_data["customer"] = customer_id
-            
-            payment_intent = stripe.PaymentIntent.create(**payment_intent_data)
-            
-            return {
-                "id": payment_intent.id,
-                "client_secret": payment_intent.client_secret,
-                "amount": payment_intent.amount,
-                "currency": payment_intent.currency,
-                "status": payment_intent.status
-            }
-            
-        except stripe.error.StripeError as e:
-            logger.error(f"Erreur Stripe lors de la création du PaymentIntent: {e}")
-            raise Exception(f"Erreur lors de la création du PaymentIntent: {str(e)}")
-    
-    @staticmethod
-    def confirm_payment_intent(payment_intent_id: str) -> Dict[str, Any]:
-        """
-        Confirme un PaymentIntent Stripe
-        """
-        try:
-            payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
-            
-            if payment_intent.status == "succeeded":
-                return {
-                    "id": payment_intent.id,
-                    "status": payment_intent.status,
-                    "amount": payment_intent.amount,
-                    "currency": payment_intent.currency,
-                    "customer_id": payment_intent.customer
-                }
-            else:
-                raise Exception(f"PaymentIntent non réussi. Statut: {payment_intent.status}")
-                
-        except stripe.error.StripeError as e:
-            logger.error(f"Erreur Stripe lors de la confirmation du PaymentIntent: {e}")
-            raise Exception(f"Erreur lors de la confirmation du PaymentIntent: {str(e)}")
+router = APIRouter(prefix="/payment", tags=["payment"])
 
-def create_payment_intent_service(db: Session, user_data: Dict[str, Any]) -> Dict[str, Any]:
+@router.post("/create-intent", response_model=PaymentIntentResponse)
+async def create_payment_intent(
+    request: PaymentIntentRequest,
+    db: Session = Depends(get_database)
+):
     """
-    Service principal pour créer un PaymentIntent
+    Crée un PaymentIntent Stripe pour l'inscription avec paiement
     """
     try:
-        # Créer ou récupérer le client Stripe
-        customer_id = StripeService.create_or_get_customer(
-            email=user_data["email"],
-            first_name=user_data["firstName"],
-            last_name=user_data["lastName"]
-        )
+        # Vérifier si l'email existe déjà
+        existing_user = db.query(User).filter(User.email == request.email).first()
+        if existing_user and existing_user.is_registered:
+            return PaymentIntentResponse(
+                success=False,
+                error="Un utilisateur avec cet email existe déjà",
+                message="Email déjà utilisé"
+            )
         
-        # Créer le PaymentIntent (999 = 9.99€ en centimes)
-        payment_intent = StripeService.create_payment_intent(
-            amount=999,
-            currency="eur",
-            customer_id=customer_id,
-            metadata={
-                "email": user_data["email"],
-                "first_name": user_data["firstName"],
-                "last_name": user_data["lastName"],
-                "device_id": user_data["device_id"],
-                "platform": user_data["platform"],
-                "password": user_data.get("password", "")  # Ajouter le mot de passe si fourni
-            }
-        )
-        
-        return {
-            "client_secret": payment_intent["client_secret"],
-            "payment_intent_id": payment_intent["id"],
-            "customer_id": customer_id
+        # Créer le PaymentIntent
+        user_data = {
+            "email": request.email,
+            "firstName": request.firstName,
+            "lastName": request.lastName,
+            "device_id": request.device_id,
+            "platform": request.platform,
+            "password": request.password  # AJOUT: passer le mot de passe
         }
+        
+        result = create_payment_intent_service(db, user_data)
+        
+        return PaymentIntentResponse(
+            success=True,
+            client_secret=result["client_secret"],
+            payment_intent_id=result["payment_intent_id"],
+            message="PaymentIntent créé avec succès"
+        )
         
     except Exception as e:
         logger.error(f"Erreur lors de la création du PaymentIntent: {e}")
-        raise e
+        return PaymentIntentResponse(
+            success=False,
+            error=str(e),
+            message="Erreur lors de la création du paiement"
+        )
 
-def validate_and_create_user(db: Session, payment_data: Dict[str, Any]) -> Dict[str, Any]:
+@router.post("/confirm", response_model=PaymentConfirmationResponse)
+async def confirm_payment(
+    request: PaymentConfirmRequest,
+    db: Session = Depends(get_database)
+):
     """
-    Valide le paiement et crée l'utilisateur avec son abonnement
+    Confirme le paiement et crée l'utilisateur avec son abonnement
     """
     try:
-        # Confirmer le PaymentIntent
-        payment_intent = StripeService.confirm_payment_intent(payment_data["payment_intent_id"])
-        
-        # Vérifier si l'email existe déjà sur un utilisateur INSCRIT
-        existing_user = db.query(User).filter(
-            User.email == payment_data["email"]
-        ).filter(
-            User.is_registered == True
-        ).first()
-        
-        if existing_user:
-            raise ValueError("Un utilisateur avec cet email est déjà inscrit")
-        
-        # Essayer de récupérer l'utilisateur par device_id
-        user = db.query(User).filter(User.device_id == payment_data["device_id"]).first()
-        
-        if user:
-            # MISE À JOUR de l'utilisateur existant
-            user.email = payment_data["email"]
-            user.password_hash = hash_password(payment_data["password"])
-            user.first_name = payment_data["firstName"]
-            user.last_name = payment_data["lastName"]
-            user.stripe_customer_id = payment_intent["customer_id"]
-            user.is_registered = True
-        else:
-            # CRÉATION d'un nouvel utilisateur
-            platform_value = payment_data["platform"]
-            if isinstance(platform_value, str):
-                platform_value = PlatformEnum(platform_value)
-            
-            user = User(
-                email=payment_data["email"],
-                password_hash=hash_password(payment_data["password"]),
-                first_name=payment_data["firstName"],
-                last_name=payment_data["lastName"],
-                device_id=payment_data["device_id"],
-                platform=platform_value,
-                stripe_customer_id=payment_intent["customer_id"],
-                is_registered=True
-            )
-            db.add(user)
-        
-        db.commit()
-        db.refresh(user)
-        
-        # Créer l'abonnement en base (1 mois à partir de maintenant)
-        subscription = Subscription(
-            user_id=user.id,
-            stripe_subscription_id=None,  # Pas d'abonnement Stripe récurrent pour l'instant
-            stripe_price_id=STRIPE_PRICE_ID,
-            status=SubscriptionStatusEnum.active,
-            current_period_start=datetime.utcnow(),
-            current_period_end=datetime.utcnow() + timedelta(days=30),  # 1 mois
-            cancel_at_period_end=False
-        )
-        db.add(subscription)
-        
-        # Enregistrer le paiement en base
-        payment = Payment(
-            user_id=user.id,
-            subscription_id=subscription.id,
-            stripe_payment_intent_id=payment_intent["id"],
-            amount=9.99,
-            currency="eur",
-            status=PaymentStatusEnum.completed,
-            meta_data=json.dumps({
-                "email": payment_data["email"],
-                "first_name": payment_data["firstName"],
-                "last_name": payment_data["lastName"]
-            })
-        )
-        db.add(payment)
-        
-        db.commit()
-        
-        # Créer le token d'accès
-        token = create_access_token({"sub": str(user.id)})
-        
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "user_id": str(user.id),
-            "subscription_id": str(subscription.id),
-            "payment_intent_id": payment_intent["id"]
+        # Valider le paiement et créer l'utilisateur
+        payment_data = {
+            "payment_intent_id": request.payment_intent_id,
+            "email": request.email,
+            "password": request.password,
+            "firstName": request.firstName,
+            "lastName": request.lastName,
+            "device_id": request.device_id,
+            "platform": request.platform
         }
         
+        result = validate_and_create_user(db, payment_data)
+        
+        return PaymentConfirmationResponse(
+            success=True,
+            message="Paiement confirmé et compte créé avec succès",
+            access_token=result["access_token"],
+            token_type=result["token_type"],
+            user={
+                "id": result["user_id"],
+                "email": request.email,
+                "firstName": request.firstName,
+                "lastName": request.lastName
+            }
+        )
+        
+    except ValueError as e:
+        logger.error(f"Erreur de validation: {e}")
+        return PaymentConfirmationResponse(
+            success=False,
+            error=str(e),
+            message="Erreur de validation"
+        )
     except Exception as e:
-        db.rollback()
-        logger.error(f"Erreur lors de la validation et création de l'utilisateur: {e}")
-        raise e
+        logger.error(f"Erreur lors de la confirmation du paiement: {e}")
+        return PaymentConfirmationResponse(
+            success=False,
+            error=str(e),
+            message="Erreur lors de la confirmation du paiement"
+        )
 
-def get_user_subscription(db: Session, user_id: str) -> Optional[Dict[str, Any]]:
+@router.get("/subscription", response_model=Optional[SubscriptionResponse])
+async def get_subscription(
+    current_user: User = Depends(require_auth),
+    db: Session = Depends(get_database)
+):
     """
-    Récupère l'abonnement actif d'un utilisateur
+    Récupère l'abonnement actif de l'utilisateur connecté
     """
     try:
-        subscription = db.query(Subscription).filter(
-            Subscription.user_id == user_id,
-            Subscription.status == SubscriptionStatusEnum.active
-        ).first()
+        subscription = get_user_subscription(db, str(current_user.id))
         
         if not subscription:
             return None
         
-        return {
-            "id": str(subscription.id),
-            "status": subscription.status.value,
-            "current_period_start": subscription.current_period_start.isoformat() if subscription.current_period_start else None,
-            "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
-            "cancel_at_period_end": subscription.cancel_at_period_end
-        }
+        return SubscriptionResponse(
+            id=subscription["id"],
+            status=subscription["status"],
+            current_period_start=subscription["current_period_start"],
+            current_period_end=subscription["current_period_end"],
+            cancel_at_period_end=subscription["cancel_at_period_end"]
+        )
         
     except Exception as e:
         logger.error(f"Erreur lors de la récupération de l'abonnement: {e}")
-        raise e
-
-def handle_stripe_webhook(payload: bytes, sig_header: str, db: Session) -> Dict[str, Any]:
-    """
-    Gère les webhooks Stripe
-    """
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erreur lors de la récupération de l'abonnement: {str(e)}"
         )
-        
-        logger.info(f"Webhook reçu: {event['type']}")
-        
-        # Gérer les différents types d'événements
-        if event['type'] == 'payment_intent.succeeded':
-            handle_payment_intent_succeeded(event['data']['object'], db)
-        elif event['type'] == 'invoice.payment_succeeded':
-            handle_invoice_payment_succeeded(event['data']['object'], db)
-        elif event['type'] == 'customer.subscription.updated':
-            handle_subscription_updated(event['data']['object'], db)
-        elif event['type'] == 'customer.subscription.deleted':
-            handle_subscription_deleted(event['data']['object'], db)
-        
-        return {"status": "success", "event_type": event['type']}
-        
-    except ValueError as e:
-        logger.error(f"Erreur lors du parsing du webhook: {e}")
-        raise Exception("Erreur lors du parsing du webhook")
-    except stripe.error.SignatureVerificationError as e:
-        logger.error(f"Erreur de signature du webhook: {e}")
-        raise Exception("Erreur de signature du webhook")
 
-def handle_payment_intent_succeeded(payment_intent: Dict[str, Any], db: Session):
+@router.post("/webhook")
+async def stripe_webhook(
+    request: Request,
+    stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")  # CORRECTION: Header correct
+):
     """
-    Gère l'événement payment_intent.succeeded - CRÉE LE COMPTE UTILISATEUR
+    Webhook Stripe pour synchroniser les événements de paiement
     """
     try:
-        payment_intent_id = payment_intent['id']
-        metadata = payment_intent.get('metadata', {})
+        if not stripe_signature:
+            logger.error("Signature Stripe manquante dans les headers")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signature Stripe manquante"
+            )
         
-        logger.info(f"Traitement PaymentIntent réussi: {payment_intent_id}")
-        logger.info(f"Metadata: {metadata}")
+        # Lire le body de la requête
+        payload = await request.body()
+        logger.info(f"Webhook reçu avec signature: {stripe_signature[:20]}...")
         
-        # Vérifier si le paiement existe déjà en base
+        # Traiter le webhook avec une session de base de données
+        db = next(get_database())
+        try:
+            result = handle_stripe_webhook(payload, stripe_signature, db)
+            db.close()
+        except Exception as e:
+            db.close()
+            raise e
+        
+        return {"status": "success", "event_type": result["event_type"]}
+        
+    except Exception as e:
+        logger.error(f"Erreur lors du traitement du webhook: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erreur lors du traitement du webhook: {str(e)}"
+        )
+
+@router.get("/health")
+async def payment_health_check():
+    """
+    Vérification de la santé du module de paiement
+    """
+    return {
+        "status": "healthy",
+        "module": "payment",
+        "stripe_configured": bool(os.getenv("STRIPE_SECRET_KEY"))
+    }
+
+@router.get("/status/{payment_intent_id}")
+async def check_payment_status(
+    payment_intent_id: str,
+    db: Session = Depends(get_database)
+):
+    """Vérifie si un paiement a été traité et l'utilisateur créé"""
+    try:
+        # Vérifier si le paiement existe en base
+        payment = db.query(Payment).filter(
+            Payment.stripe_payment_intent_id == payment_intent_id
+        ).first()
+        
+        if payment:
+            return {"success": True, "message": "Paiement confirmé"}
+        else:
+            return {"success": False, "message": "Paiement en attente"}
+    except Exception as e:
+        return {"success": False, "message": "Erreur vérification"}
+
+@router.post("/manual-process")
+async def manual_process_payment(
+    request: dict,
+    db: Session = Depends(get_database)
+):
+    """Endpoint temporaire pour traiter manuellement un paiement réussi"""
+    try:
+        payment_intent_id = request.get("payment_intent_id")
+        
+        if not payment_intent_id:
+            raise HTTPException(
+                status_code=400,
+                detail="payment_intent_id requis"
+            )
+        
+        # Vérifier si déjà traité
         existing_payment = db.query(Payment).filter(
             Payment.stripe_payment_intent_id == payment_intent_id
         ).first()
         
         if existing_payment:
-            logger.info(f"Paiement {payment_intent_id} déjà traité")
-            return
+            return {"success": True, "message": "Déjà traité"}
         
-        # Extraire les données des metadata
-        email = metadata.get('email')
-        first_name = metadata.get('first_name')
-        last_name = metadata.get('last_name')
-        device_id = metadata.get('device_id')
-        platform = metadata.get('platform')
-        password = metadata.get('password')
+        # Récupérer le PaymentIntent depuis Stripe
+        import stripe
+        payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
         
-        if not all([email, first_name, last_name, device_id, platform]):
-            logger.error(f"Metadata incomplètes pour PaymentIntent {payment_intent_id}: {metadata}")
-            return
-        
-        # Vérifier si l'utilisateur existe déjà avec cet email et est inscrit
-        existing_user = db.query(User).filter(
-            User.email == email,
-            User.is_registered == True
-        ).first()
-        
-        if existing_user:
-            logger.warning(f"Utilisateur avec email {email} déjà inscrit")
-            return
-        
-        # Récupérer ou créer l'utilisateur par device_id
-        user = db.query(User).filter(User.device_id == device_id).first()
-        
-        if user:
-            # Mettre à jour l'utilisateur existant
-            user.email = email
-            user.first_name = first_name
-            user.last_name = last_name
-            user.stripe_customer_id = payment_intent.get('customer')
-            user.is_registered = True
-            if password:  # Si le mot de passe est dans les metadata
-                user.password_hash = hash_password(password)
+        if payment_intent.status == "succeeded":
+            from app.payment.services import handle_payment_intent_succeeded
+            handle_payment_intent_succeeded(payment_intent, db)
+            return {"success": True, "message": "Compte créé avec succès"}
         else:
-            # Créer un nouvel utilisateur
-            platform_enum = PlatformEnum(platform) if isinstance(platform, str) else platform
+            return {"success": False, "message": f"Paiement non réussi: {payment_intent.status}"}
             
-            user = User(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                device_id=device_id,
-                platform=platform_enum,
-                stripe_customer_id=payment_intent.get('customer'),
-                is_registered=True,
-                password_hash=hash_password(password) if password else None
-            )
-            db.add(user)
-        
-        db.commit()
-        db.refresh(user)
-        
-        # Créer l'abonnement (1 mois)
-        subscription = Subscription(
-            user_id=user.id,
-            stripe_subscription_id=None,
-            stripe_price_id=STRIPE_PRICE_ID,
-            status=SubscriptionStatusEnum.active,
-            current_period_start=datetime.utcnow(),
-            current_period_end=datetime.utcnow() + timedelta(days=30),
-            cancel_at_period_end=False
-        )
-        db.add(subscription)
-        
-        # Enregistrer le paiement
-        payment = Payment(
-            user_id=user.id,
-            subscription_id=subscription.id,
-            stripe_payment_intent_id=payment_intent_id,
-            amount=payment_intent['amount'] / 100,  # Convertir centimes en euros
-            currency=payment_intent['currency'],
-            status=PaymentStatusEnum.completed,
-            meta_data=json.dumps(metadata)
-        )
-        db.add(payment)
-        
-        db.commit()
-        
-        logger.info(f"Utilisateur créé avec succès pour PaymentIntent {payment_intent_id}: {user.email}")
-        
     except Exception as e:
-        db.rollback()
-        logger.error(f"Erreur lors du traitement de payment_intent.succeeded: {e}")
-        raise e
-
-def handle_invoice_payment_succeeded(invoice: Dict[str, Any], db: Session):
-    """Gère l'événement invoice.payment_succeeded"""
-    logger.info(f"Facture payée: {invoice['id']}")
-
-def handle_subscription_updated(subscription: Dict[str, Any], db: Session):
-    """Gère l'événement customer.subscription.updated"""
-    logger.info(f"Abonnement mis à jour: {subscription['id']}")
-
-def handle_subscription_deleted(subscription: Dict[str, Any], db: Session):
-    """Gère l'événement customer.subscription.deleted"""
-    logger.info(f"Abonnement supprimé: {subscription['id']}")
+        logger.error(f"Erreur traitement manuel: {e}")
+        return {"success": False, "message": str(e)}

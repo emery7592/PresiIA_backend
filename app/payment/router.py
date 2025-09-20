@@ -216,3 +216,20 @@ async def check_payment_status(
             return {"success": False, "message": "Paiement en attente"}
     except Exception as e:
         return {"success": False, "message": "Erreur vérification"}
+
+@router.post("/webhook-debug")
+async def webhook_debug(request: Request):
+    """Endpoint temporaire pour debugger les webhooks"""
+    try:
+        payload = await request.body()
+        headers = dict(request.headers)
+        
+        logger.info("=== WEBHOOK DEBUG ===")
+        logger.info(f"Headers reçus: {headers}")
+        logger.info(f"Payload (100 premiers chars): {payload[:100]}")
+        logger.info(f"STRIPE_WEBHOOK_SECRET configuré: {bool(os.getenv('STRIPE_WEBHOOK_SECRET'))}")
+        
+        return {"status": "debug_ok", "headers_count": len(headers)}
+    except Exception as e:
+        logger.error(f"Erreur debug webhook: {e}")
+        return {"status": "debug_error", "error": str(e)}
