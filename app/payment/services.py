@@ -366,7 +366,7 @@ def handle_payment_intent_succeeded(payment_intent: Dict[str, Any], db: Session)
             amount=payment_intent['amount'] / 100,  # Convertir centimes en euros
             currency=payment_intent['currency'],
             status=PaymentStatusEnum.completed,
-            meta_data=f'{{"email": "{email}", "first_name": "{first_name}", "last_name": "{last_name}"}}'
+            metadata=f'{{"email": "{email}", "first_name": "{first_name}", "last_name": "{last_name}"}}'
         )
         db.add(payment)
         
