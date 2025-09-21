@@ -245,7 +245,7 @@ def get_user_subscription(db: Session, user_id: str) -> Optional[Dict[str, Any]]
         logger.error(f"Erreur lors de la récupération de l'abonnement: {e}")
         raise e
 
-def handle_stripe_webhook(payload: bytes, sig_header: str) -> Dict[str, Any]:
+def handle_stripe_webhook(payload: bytes, sig_header: str, db: Session) -> Dict[str, Any]:
     """
     Gère les webhooks Stripe
     """
@@ -254,15 +254,17 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> Dict[str, Any]:
             payload, sig_header, STRIPE_WEBHOOK_SECRET
         )
         
+        logger.info(f"Événement webhook reçu: {event['type']}")
+        
         # Gérer les différents types d'événements
         if event['type'] == 'payment_intent.succeeded':
-            handle_payment_intent_succeeded(event['data']['object'])
+            handle_payment_intent_succeeded(event['data']['object'], db)
         elif event['type'] == 'invoice.payment_succeeded':
-            handle_invoice_payment_succeeded(event['data']['object'])
+            handle_invoice_payment_succeeded(event['data']['object'], db)
         elif event['type'] == 'customer.subscription.updated':
-            handle_subscription_updated(event['data']['object'])
+            handle_subscription_updated(event['data']['object'], db)
         elif event['type'] == 'customer.subscription.deleted':
-            handle_subscription_deleted(event['data']['object'])
+            handle_subscription_deleted(event['data']['object'], db)
         
         return {"status": "success", "event_type": event['type']}
         
@@ -273,18 +275,118 @@ def handle_stripe_webhook(payload: bytes, sig_header: str) -> Dict[str, Any]:
         logger.error(f"Erreur de signature du webhook: {e}")
         raise Exception("Erreur de signature du webhook")
 
-def handle_payment_intent_succeeded(payment_intent: Dict[str, Any]):
-    """Gère l'événement payment_intent.succeeded"""
-    logger.info(f"PaymentIntent réussi: {payment_intent['id']}")
+def handle_payment_intent_succeeded(payment_intent: Dict[str, Any], db: Session):
+    """
+    Gère l'événement payment_intent.succeeded - CRÉE LE COMPTE UTILISATEUR
+    """
+    try:
+        payment_intent_id = payment_intent['id']
+        metadata = payment_intent.get('metadata', {})
+        
+        logger.info(f"Traitement PaymentIntent réussi: {payment_intent_id}")
+        logger.info(f"Metadata reçues: {metadata}")
+        
+        # Vérifier si le paiement existe déjà en base
+        existing_payment = db.query(Payment).filter(
+            Payment.stripe_payment_intent_id == payment_intent_id
+        ).first()
+        
+        if existing_payment:
+            logger.info(f"Paiement {payment_intent_id} déjà traité")
+            return
+        
+        # Extraire les données des metadata
+        email = metadata.get('email')
+        first_name = metadata.get('first_name')
+        last_name = metadata.get('last_name')
+        device_id = metadata.get('device_id')
+        platform = metadata.get('platform')
+        
+        if not all([email, first_name, last_name, device_id, platform]):
+            logger.error(f"Metadata incomplètes pour PaymentIntent {payment_intent_id}: {metadata}")
+            return
+        
+        # Vérifier si l'utilisateur existe déjà avec cet email et est inscrit
+        existing_user = db.query(User).filter(
+            User.email == email,
+            User.is_registered == True
+        ).first()
+        
+        if existing_user:
+            logger.warning(f"Utilisateur avec email {email} déjà inscrit")
+            return
+        
+        # Récupérer ou créer l'utilisateur par device_id
+        user = db.query(User).filter(User.device_id == device_id).first()
+        
+        if user:
+            # Mettre à jour l'utilisateur existant
+            user.email = email
+            user.first_name = first_name
+            user.last_name = last_name
+            user.stripe_customer_id = payment_intent.get('customer')
+            user.is_registered = True
+        else:
+            # Créer un nouvel utilisateur
+            from app.auth.models import PlatformEnum
+            platform_enum = PlatformEnum(platform) if isinstance(platform, str) else platform
+            
+            user = User(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                device_id=device_id,
+                platform=platform_enum,
+                stripe_customer_id=payment_intent.get('customer'),
+                is_registered=True,
+                password_hash=None  # Sera défini lors du premier login
+            )
+            db.add(user)
+        
+        db.commit()
+        db.refresh(user)
+        
+        # Créer l'abonnement (1 mois)
+        subscription = Subscription(
+            user_id=user.id,
+            stripe_subscription_id=None,
+            stripe_price_id=STRIPE_PRICE_ID,
+            status=SubscriptionStatusEnum.active,
+            current_period_start=datetime.utcnow(),
+            current_period_end=datetime.utcnow() + timedelta(days=30),
+            cancel_at_period_end=False
+        )
+        db.add(subscription)
+        
+        # Enregistrer le paiement
+        payment = Payment(
+            user_id=user.id,
+            subscription_id=subscription.id,
+            stripe_payment_intent_id=payment_intent_id,
+            amount=payment_intent['amount'] / 100,  # Convertir centimes en euros
+            currency=payment_intent['currency'],
+            status=PaymentStatusEnum.completed,
+            meta_data=f'{{"email": "{email}", "first_name": "{first_name}", "last_name": "{last_name}"}}'
+        )
+        db.add(payment)
+        
+        db.commit()
+        
+        logger.info(f"Utilisateur créé avec succès pour PaymentIntent {payment_intent_id}: {user.email}")
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erreur lors du traitement de payment_intent.succeeded: {e}")
+        raise e
 
-def handle_invoice_payment_succeeded(invoice: Dict[str, Any]):
+def handle_invoice_payment_succeeded(invoice: Dict[str, Any], db: Session):
     """Gère l'événement invoice.payment_succeeded"""
     logger.info(f"Facture payée: {invoice['id']}")
 
-def handle_subscription_updated(subscription: Dict[str, Any]):
+def handle_subscription_updated(subscription: Dict[str, Any], db: Session):
     """Gère l'événement customer.subscription.updated"""
     logger.info(f"Abonnement mis à jour: {subscription['id']}")
 
-def handle_subscription_deleted(subscription: Dict[str, Any]):
+def handle_subscription_deleted(subscription: Dict[str, Any], db: Session):
     """Gère l'événement customer.subscription.deleted"""
     logger.info(f"Abonnement supprimé: {subscription['id']}")
