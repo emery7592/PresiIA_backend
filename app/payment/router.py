@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from app.database.database import get_database
 from app.auth.models import User, Subscription, Payment, SubscriptionStatusEnum, PaymentStatusEnum
 from app.auth.services import hash_password, create_access_token
@@ -21,6 +22,7 @@ STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "price_1OqXqXqXqXqXqXqXqXqXqXqX")
 # Configuration du logging
 logger = logging.getLogger(__name__)
 
+router = APIRouter(prefix="/payment", tags=["payment"])
 class StripeService:
     """Service pour gérer les interactions avec Stripe"""
     
