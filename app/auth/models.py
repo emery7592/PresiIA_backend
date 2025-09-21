@@ -83,7 +83,7 @@ class Payment(Base):
     status = Column(Enum(PaymentStatusEnum), default=PaymentStatusEnum.pending)
     payment_method_id = Column(String(255), nullable=True)
     failure_reason = Column(String(500), nullable=True)
-    metadata = Column(JSON, nullable=True)  # CORRIGÉ: metadata -> meta_data
+    meta_data = Column(JSON, nullable=True)  # CORRIGÉ: metadata -> meta_data
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
