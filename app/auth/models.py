@@ -90,3 +90,18 @@ class Payment(Base):
     # Relations
     user = relationship("User", back_populates="payments")
     subscription = relationship("Subscription", back_populates="payments")
+
+# À ajouter dans auth/models.py après la classe Payment
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    token = Column(String(255), unique=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relation
+    user = relationship("User", backref="password_reset_tokens")

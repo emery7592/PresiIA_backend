@@ -20,3 +20,18 @@ class ChatRequest(BaseModel):
     message: str
     device_id: str
     platform: PlatformEnum
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+class ForgotPasswordResponse(BaseModel):
+    success: bool
+    message: str
+
+class ResetPasswordResponse(BaseModel):
+    success: bool
+    message: str
