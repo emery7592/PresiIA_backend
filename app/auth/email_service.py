@@ -31,7 +31,7 @@ class EmailService:
         """
         try:
             # URL de reset - ajustez selon votre domaine
-            reset_url = f"https://votre-domaine.com/reset-password?token={reset_token}"
+            reset_url = f"https://redpill-ia.app/reset-password?token={reset_token}"
             
             # Template HTML
             html_content = f"""
