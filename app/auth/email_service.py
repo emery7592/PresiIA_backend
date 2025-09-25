@@ -1,38 +1,73 @@
 import os
 import logging
-from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
-from typing import List
+import httpx
+from typing import Dict, Any
 from dotenv import load_dotenv
 from datetime import datetime
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Configuration email mise à jour pour Brevo (contourne le blocage DigitalOcean)
-conf = ConnectionConfig(
-    MAIL_USERNAME=os.getenv("BREVO_USERNAME", os.getenv("MAIL_USERNAME")),  # Fallback vers ancienne config
-    MAIL_PASSWORD=os.getenv("BREVO_PASSWORD", os.getenv("MAIL_PASSWORD")),  # Clé API Brevo ou ancien mot de passe
-    MAIL_FROM=os.getenv("BREVO_FROM_EMAIL", os.getenv("MAIL_FROM")),        # Email expéditeur
-    MAIL_FROM_NAME=os.getenv("BREVO_FROM_NAME", os.getenv("MAIL_FROM_NAME", "RedPill IA")),
-    MAIL_PORT=int(os.getenv("MAIL_PORT", 587)),
-    MAIL_SERVER=os.getenv("MAIL_SERVER", "smtp-relay.brevo.com"),  # Nouveau serveur par défaut
-    MAIL_STARTTLS=True,
-    MAIL_SSL_TLS=False,
-    USE_CREDENTIALS=True,
-    VALIDATE_CERTS=True,
-    TEMPLATE_FOLDER=None
-)
-
-fm = FastMail(conf)
-
 class EmailService:
-    @staticmethod
-    async def send_password_reset_email(user_email: str, user_name: str, reset_token: str) -> bool:
-        """
-        Envoie un email de réinitialisation de mot de passe via Brevo
-        """
+    """Service d'envoi d'email via l'API Brevo (remplace SMTP)"""
+    
+    def __init__(self):
+        self.api_key = os.getenv("BREVO_PASSWORD")  # Utilise la même variable
+        self.from_email = os.getenv("BREVO_FROM_EMAIL", os.getenv("MAIL_FROM", "redipill.ia@gmail.com"))
+        self.from_name = os.getenv("BREVO_FROM_NAME", os.getenv("MAIL_FROM_NAME", "RedPill IA"))
+        self.base_url = "https://api.brevo.com/v3"
+        
+        if not self.api_key:
+            logger.error("BREVO_PASSWORD (clé API) manquante dans les variables d'environnement")
+            raise ValueError("Clé API Brevo manquante")
+    
+    async def _send_email_via_api(self, to_email: str, subject: str, html_content: str, text_content: str = None) -> bool:
+        """Envoie un email via l'API Brevo"""
         try:
-            # URL de reset - ajustez selon votre domaine
+            headers = {
+                "api-key": self.api_key,
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "sender": {
+                    "name": self.from_name,
+                    "email": self.from_email
+                },
+                "to": [
+                    {
+                        "email": to_email
+                    }
+                ],
+                "subject": subject,
+                "htmlContent": html_content
+            }
+            
+            # Ajouter le contenu texte si fourni
+            if text_content:
+                payload["textContent"] = text_content
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{self.base_url}/smtp/email",
+                    headers=headers,
+                    json=payload
+                )
+                
+                if response.status_code == 201:
+                    logger.info(f"✅ Email envoyé avec succès via API Brevo à {to_email}")
+                    return True
+                else:
+                    logger.error(f"❌ Erreur API Brevo: {response.status_code} - {response.text}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de l'envoi via API Brevo à {to_email}: {str(e)}")
+            return False
+    
+    async def send_password_reset_email(self, user_email: str, user_name: str, reset_token: str) -> bool:
+        """Envoie un email de réinitialisation de mot de passe"""
+        try:
             reset_url = f"https://redpill-ia.app/reset-password?token={reset_token}"
             
             # Template HTML professionnel
@@ -228,7 +263,7 @@ class EmailService:
             </html>
             """
             
-            # Version texte simple améliorée
+            # Version texte simple
             text_content = f"""
 🔐 RÉINITIALISATION DE MOT DE PASSE - RedPill IA
 
@@ -250,28 +285,20 @@ L'équipe RedPill IA ✨
 Cet email a été envoyé automatiquement par RedPill IA.
 Merci de ne pas répondre directement à cet email.
             """
-
-            message = MessageSchema(
+            
+            return await self._send_email_via_api(
+                to_email=user_email,
                 subject="🔐 Réinitialisation de votre mot de passe - RedPill IA",
-                recipients=[user_email],
-                body=text_content,
-                html=html_content,
-                subtype=MessageType.html
+                html_content=html_content,
+                text_content=text_content
             )
-
-            await fm.send_message(message)
-            logger.info(f"✅ Email de reset envoyé avec succès via Brevo à {user_email}")
-            return True
-
+            
         except Exception as e:
-            logger.error(f"❌ Erreur lors de l'envoi via Brevo à {user_email}: {str(e)}")
+            logger.error(f"❌ Erreur dans send_password_reset_email: {str(e)}")
             return False
-
-    @staticmethod
-    async def send_password_changed_confirmation(user_email: str, user_name: str) -> bool:
-        """
-        Envoie un email de confirmation après changement de mot de passe
-        """
+    
+    async def send_password_changed_confirmation(self, user_email: str, user_name: str) -> bool:
+        """Envoie un email de confirmation après changement de mot de passe"""
         try:
             html_content = f"""
             <!DOCTYPE html>
@@ -309,11 +336,6 @@ Merci de ne pas répondre directement à cet email.
                         font-weight: 700;
                         letter-spacing: -0.5px;
                     }}
-                    .header p {{
-                        margin: 8px 0 0 0;
-                        opacity: 0.9;
-                        font-size: 16px;
-                    }}
                     .content {{ 
                         padding: 40px 30px; 
                     }}
@@ -343,29 +365,6 @@ Merci de ne pas répondre directement à cet email.
                         margin: 24px 0;
                         color: #92400e;
                     }}
-                    .security-alert strong {{
-                        color: #78350f;
-                    }}
-                    .security-tips {{
-                        background-color: #f0f9ff;
-                        border: 1px solid #0ea5e9;
-                        border-radius: 6px;
-                        padding: 20px;
-                        margin: 24px 0;
-                    }}
-                    .security-tips h4 {{
-                        margin: 0 0 12px 0;
-                        color: #0369a1;
-                        font-size: 16px;
-                    }}
-                    .security-tips ul {{
-                        margin: 0;
-                        padding-left: 20px;
-                        color: #0c4a6e;
-                    }}
-                    .security-tips li {{
-                        margin-bottom: 6px;
-                    }}
                     .timestamp {{
                         font-size: 14px;
                         color: #6b7280;
@@ -383,25 +382,9 @@ Merci de ne pas répondre directement à cet email.
                         background-color: #f9fafb;
                         border-top: 1px solid #e5e7eb;
                     }}
-                    .footer a {{
-                        color: #10b981;
-                        text-decoration: none;
-                    }}
                     .brand {{
                         color: #10b981;
                         font-weight: 700;
-                    }}
-                    @media (max-width: 600px) {{
-                        .email-container {{
-                            margin: 0;
-                            border-radius: 0;
-                        }}
-                        .content {{
-                            padding: 30px 20px;
-                        }}
-                        .header {{
-                            padding: 30px 20px;
-                        }}
                     }}
                 </style>
             </head>
@@ -426,48 +409,26 @@ Merci de ne pas répondre directement à cet email.
                             {datetime.now().strftime('%d/%m/%Y à %H:%M')} (heure française)
                         </div>
                         
-                        <p style="color: #4b5563; margin: 20px 0;">
-                            Votre mot de passe pour <span class="brand">RedPill IA</span> a été mis à jour avec succès. 
-                            Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.
-                        </p>
-                        
                         <div class="security-alert">
                             <strong>🔒 Sécurité :</strong> Si vous n'êtes pas à l'origine de cette modification, 
                             contactez-nous <strong>immédiatement</strong> à 
                             <a href="mailto:support@redpill-ia.app" style="color: #dc2626;">support@redpill-ia.app</a>
                         </div>
                         
-                        <div class="security-tips">
-                            <h4>🛡️ Conseils de sécurité :</h4>
-                            <ul>
-                                <li>Ne partagez jamais votre mot de passe avec qui que ce soit</li>
-                                <li>Utilisez un mot de passe unique et complexe pour chaque service</li>
-                                <li>Déconnectez-vous toujours des appareils partagés</li>
-                                <li>Activez l'authentification à deux facteurs si disponible</li>
-                                <li>Surveillez régulièrement l'activité de votre compte</li>
-                            </ul>
-                        </div>
-                        
                         <p style="margin-top: 32px; color: #4b5563;">
-                            Merci de faire confiance à <span class="brand">RedPill IA</span> pour vos besoins en IA ! 🚀
-                        </p>
-                        
-                        <p style="color: #4b5563;">
                             Cordialement,<br>
                             L'équipe <span class="brand">RedPill IA</span> ✨
                         </p>
                     </div>
                     <div class="footer">
                         <p>Cet email a été envoyé automatiquement par <span class="brand">RedPill IA</span></p>
-                        <p>Merci de ne pas répondre directement à cet email.</p>
-                        <p>Des questions ? Contactez-nous à <a href="mailto:support@redpill-ia.app">support@redpill-ia.app</a></p>
                         <p>&copy; 2025 RedPill IA. Tous droits réservés.</p>
                     </div>
                 </div>
             </body>
             </html>
             """
-
+            
             text_content = f"""
 ✅ MOT DE PASSE MODIFIÉ AVEC SUCCÈS - RedPill IA
 
@@ -477,214 +438,23 @@ Bonjour {user_name} !
 
 📅 Date de modification : {datetime.now().strftime('%d/%m/%Y à %H:%M')} (heure française)
 
-Votre mot de passe pour RedPill IA a été mis à jour avec succès. 
-Vous pouvez maintenant vous connecter avec votre nouveau mot de passe.
-
 🔒 SÉCURITÉ : Si vous n'êtes pas à l'origine de cette modification, 
 contactez-nous IMMÉDIATEMENT à support@redpill-ia.app
 
-🛡️ CONSEILS DE SÉCURITÉ :
-• Ne partagez jamais votre mot de passe avec qui que ce soit
-• Utilisez un mot de passe unique et complexe pour chaque service
-• Déconnectez-vous toujours des appareils partagés
-• Activez l'authentification à deux facteurs si disponible
-• Surveillez régulièrement l'activité de votre compte
-
-Merci de faire confiance à RedPill IA pour vos besoins en IA ! 🚀
-
 Cordialement,
 L'équipe RedPill IA ✨
-
----
-Cet email a été envoyé automatiquement par RedPill IA.
-Des questions ? Contactez-nous à support@redpill-ia.app
             """
-
-            message = MessageSchema(
+            
+            return await self._send_email_via_api(
+                to_email=user_email,
                 subject="✅ Votre mot de passe a été modifié avec succès - RedPill IA",
-                recipients=[user_email],
-                body=text_content,
-                html=html_content,
-                subtype=MessageType.html
+                html_content=html_content,
+                text_content=text_content
             )
-
-            await fm.send_message(message)
-            logger.info(f"✅ Email de confirmation envoyé avec succès via Brevo à {user_email}")
-            return True
-
+            
         except Exception as e:
-            logger.error(f"❌ Erreur lors de l'envoi de confirmation via Brevo à {user_email}: {str(e)}")
+            logger.error(f"❌ Erreur dans send_password_changed_confirmation: {str(e)}")
             return False
 
-    @staticmethod
-    async def send_welcome_email(user_email: str, user_name: str) -> bool:
-        """
-        Envoie un email de bienvenue lors de l'inscription (bonus)
-        """
-        try:
-            html_content = f"""
-            <!DOCTYPE html>
-            <html lang="fr">
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Bienvenue sur RedPill IA !</title>
-                <style>
-                    body {{ 
-                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                        line-height: 1.6; 
-                        color: #333333; 
-                        margin: 0;
-                        padding: 0;
-                        background-color: #f8fafc;
-                    }}
-                    .email-container {{ 
-                        max-width: 600px; 
-                        margin: 20px auto; 
-                        background-color: #ffffff;
-                        border-radius: 12px;
-                        overflow: hidden;
-                        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-                    }}
-                    .header {{ 
-                        background: linear-gradient(135deg, #8b5cf6 0%, #a855f7 100%);
-                        color: white; 
-                        padding: 40px 30px; 
-                        text-align: center; 
-                    }}
-                    .header h1 {{
-                        margin: 0;
-                        font-size: 32px;
-                        font-weight: 700;
-                    }}
-                    .content {{ 
-                        padding: 40px 30px; 
-                    }}
-                    .welcome-message {{
-                        font-size: 18px;
-                        color: #1f2937;
-                        margin-bottom: 24px;
-                        text-align: center;
-                    }}
-                    .features-list {{
-                        background-color: #f8fafc;
-                        border-radius: 8px;
-                        padding: 24px;
-                        margin: 24px 0;
-                    }}
-                    .features-list h3 {{
-                        margin: 0 0 16px 0;
-                        color: #1f2937;
-                        text-align: center;
-                    }}
-                    .feature {{
-                        display: flex;
-                        align-items: center;
-                        margin-bottom: 12px;
-                    }}
-                    .feature-icon {{
-                        font-size: 20px;
-                        margin-right: 12px;
-                        width: 24px;
-                    }}
-                    .brand {{
-                        color: #8b5cf6;
-                        font-weight: 700;
-                    }}
-                    .footer {{ 
-                        text-align: center; 
-                        padding: 32px 30px; 
-                        font-size: 14px; 
-                        color: #9ca3af; 
-                        background-color: #f9fafb;
-                    }}
-                </style>
-            </head>
-            <body>
-                <div class="email-container">
-                    <div class="header">
-                        <h1>🎉 Bienvenue !</h1>
-                    </div>
-                    <div class="content">
-                        <div class="welcome-message">
-                            Salut <strong>{user_name}</strong> ! 👋<br>
-                            Bienvenue dans l'univers de <span class="brand">RedPill IA</span> !
-                        </div>
-                        
-                        <p>Félicitations ! Votre compte a été créé avec succès. Vous faites maintenant partie de notre communauté d'utilisateurs qui explorent le potentiel de l'IA.</p>
-                        
-                        <div class="features-list">
-                            <h3>🚀 Ce que vous pouvez faire maintenant :</h3>
-                            <div class="feature">
-                                <span class="feature-icon">💬</span>
-                                <span>Poser des questions illimitées à notre IA</span>
-                            </div>
-                            <div class="feature">
-                                <span class="feature-icon">🧠</span>
-                                <span>Accéder à des modèles d'IA avancés</span>
-                            </div>
-                            <div class="feature">
-                                <span class="feature-icon">📱</span>
-                                <span>Synchroniser sur tous vos appareils</span>
-                            </div>
-                            <div class="feature">
-                                <span class="feature-icon">🔒</span>
-                                <span>Profiter d'une expérience sécurisée</span>
-                            </div>
-                        </div>
-                        
-                        <p>Si vous avez des questions ou besoin d'aide, n'hésitez pas à nous contacter.</p>
-                        
-                        <p style="margin-top: 32px; text-align: center;">
-                            Prêt à découvrir le futur de l'IA ? 🚀<br>
-                            <strong>L'équipe <span class="brand">RedPill IA</span></strong> ✨
-                        </p>
-                    </div>
-                    <div class="footer">
-                        <p>&copy; 2025 RedPill IA. Tous droits réservés.</p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
-
-            text_content = f"""
-🎉 BIENVENUE SUR REDPILL IA !
-
-Salut {user_name} ! 👋
-
-Bienvenue dans l'univers de RedPill IA !
-
-Félicitations ! Votre compte a été créé avec succès. Vous faites maintenant partie de notre communauté d'utilisateurs qui explorent le potentiel de l'IA.
-
-🚀 CE QUE VOUS POUVEZ FAIRE MAINTENANT :
-💬 Poser des questions illimitées à notre IA
-🧠 Accéder à des modèles d'IA avancés
-📱 Synchroniser sur tous vos appareils
-🔒 Profiter d'une expérience sécurisée
-
-Si vous avez des questions ou besoin d'aide, n'hésitez pas à nous contacter.
-
-Prêt à découvrir le futur de l'IA ? 🚀
-
-L'équipe RedPill IA ✨
-
----
-© 2025 RedPill IA. Tous droits réservés.
-            """
-
-            message = MessageSchema(
-                subject="🎉 Bienvenue sur RedPill IA ! Votre aventure IA commence maintenant",
-                recipients=[user_email],
-                body=text_content,
-                html=html_content,
-                subtype=MessageType.html
-            )
-
-            await fm.send_message(message)
-            logger.info(f"✅ Email de bienvenue envoyé avec succès via Brevo à {user_email}")
-            return True
-
-        except Exception as e:
-            logger.error(f"❌ Erreur lors de l'envoi de bienvenue via Brevo à {user_email}: {str(e)}")
-            return False
+# Instance globale
+email_service = EmailService()

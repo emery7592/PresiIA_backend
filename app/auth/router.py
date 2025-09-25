@@ -10,7 +10,7 @@ from app.auth.schemas import UserRegister, UserLogin, ChatRequest
 from app.auth.models import User, PasswordResetToken
 from app.auth.services import *
 from app.auth.dependencies import get_current_user
-from app.auth.email_service import EmailService
+from app.auth.email_service import email_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -106,7 +106,7 @@ async def forgot_password(
         db.commit()
         
         # Envoyer l'email
-        email_sent = await EmailService.send_password_reset_email(
+        email_sent = await email_service.send_password_reset_email(
             user_email=user.email,
             user_name=user.first_name or "Utilisateur",
             reset_token=reset_token
