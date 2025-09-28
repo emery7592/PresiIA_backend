@@ -177,7 +177,7 @@ async def reset_password(
         db.commit()
         
         # Envoyer email de confirmation
-        await EmailService.send_password_changed_confirmation(
+        await email_service.send_password_changed_confirmation(
             user_email=user.email,
             user_name=user.first_name or "Utilisateur"
         )
