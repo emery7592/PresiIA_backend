@@ -169,7 +169,7 @@ async def reset_password(
             )
         
         # Mettre à jour le mot de passe
-        user.password_hash = hash_password(request.new_password)
+        user.password_hash = hash_password(request.new_password[:72])
         
         # Marquer le token comme utilisé
         token_record.used = True
