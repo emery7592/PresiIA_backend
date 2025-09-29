@@ -44,7 +44,7 @@ def logout():
 import secrets
 from datetime import datetime, timedelta
 from app.auth.models import PasswordResetToken
-from app.auth.email_service import EmailService
+
 
 # Schemas à ajouter dans auth/schemas.py
 class ForgotPasswordRequest(BaseModel):
