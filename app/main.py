@@ -5,8 +5,10 @@ from app.auth.router import router as auth_router
 from app.payment.router import router as payment_router
 from app.chat.services import chat as gradio_chat
 from fastapi.middleware.cors import CORSMiddleware
+from app.static.pages import router as pages_router
 import uvicorn
 import logging
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +25,7 @@ app.add_middleware(
 app.include_router(chat_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(payment_router, prefix="/api")
+app.include_router(pages_router)
 
 @app.get("/")
 def read_root():
