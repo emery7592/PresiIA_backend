@@ -80,3 +80,17 @@ class ChatRequest(BaseModel):
     language: str = "en"
     device_id: str
 
+class AppleReceiptRequest(BaseModel):
+    receipt_data: str
+    device_id: str
+
+class GooglePurchaseRequest(BaseModel):
+    purchase_token: str
+    product_id: str
+    device_id: str
+
+class IAPVerificationResponse(BaseModel):
+    success: bool
+    message: str
+    subscription: Optional[dict] = None
+    error: Optional[str] = None

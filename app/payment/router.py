@@ -16,6 +16,15 @@ from app.payment.services import (
     get_user_subscription,
     handle_stripe_webhook
 )
+from app.payment.iap_service import (
+    create_or_update_subscription_from_apple,
+    create_or_update_subscription_from_google
+)
+from app.payment.schemas import (
+    AppleReceiptRequest,
+    GooglePurchaseRequest,
+    IAPVerificationResponse
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,3 +126,118 @@ async def check_payment_status(
             return {"success": False, "message": "Paiement en attente"}
     except Exception as e:
         return {"success": False, "message": "Erreur vérification"}
+
+@router.post("/verify/apple", response_model=IAPVerificationResponse)
+async def verify_apple_purchase(
+    request: AppleReceiptRequest,
+    db: Session = Depends(get_database)
+):
+    try:
+        # Récupérer l'utilisateur par device_id
+        user = db.query(User).filter(User.device_id == request.device_id).first()
+        
+        if not user:
+            return IAPVerificationResponse(
+                success=False,
+                message="Utilisateur non trouvé",
+                error="USER_NOT_FOUND"
+            )
+        
+        # Créer/mettre à jour l'abonnement
+        subscription = create_or_update_subscription_from_apple(
+            db, user, request.receipt_data
+        )
+        
+        return IAPVerificationResponse(
+            success=True,
+            message="Abonnement Apple vérifié",
+            subscription={
+                "id": str(subscription.id),
+                "status": subscription.status.value,
+                "expires_at": subscription.current_period_end.isoformat()
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Erreur vérification Apple: {e}")
+        return IAPVerificationResponse(
+            success=False,
+            message="Erreur lors de la vérification",
+            error=str(e)
+        )
+
+
+@router.post("/verify/google", response_model=IAPVerificationResponse)
+async def verify_google_purchase(
+    request: GooglePurchaseRequest,
+    db: Session = Depends(get_database)
+):
+    try:
+        # Récupérer l'utilisateur par device_id
+        user = db.query(User).filter(User.device_id == request.device_id).first()
+        
+        if not user:
+            return IAPVerificationResponse(
+                success=False,
+                message="Utilisateur non trouvé",
+                error="USER_NOT_FOUND"
+            )
+        
+        # Créer/mettre à jour l'abonnement
+        subscription = create_or_update_subscription_from_google(
+            db, user, request.purchase_token, request.product_id
+        )
+        
+        return IAPVerificationResponse(
+            success=True,
+            message="Abonnement Google vérifié",
+            subscription={
+                "id": str(subscription.id),
+                "status": subscription.status.value,
+                "expires_at": subscription.current_period_end.isoformat()
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Erreur vérification Google: {e}")
+        return IAPVerificationResponse(
+            success=False,
+            message="Erreur lors de la vérification",
+            error=str(e)
+        )
+
+
+@router.get("/subscription/status")
+async def get_subscription_status(
+    current_user: User = Depends(require_auth),
+    db: Session = Depends(get_database)
+):
+    try:
+        subscription = db.query(Subscription).filter(
+            Subscription.user_id == current_user.id,
+            Subscription.status == SubscriptionStatusEnum.active
+        ).first()
+        
+        if not subscription:
+            return {
+                "has_subscription": False,
+                "message": "Aucun abonnement actif"
+            }
+        
+        return {
+            "has_subscription": True,
+            "subscription": {
+                "id": str(subscription.id),
+                "platform": subscription.platform_source,
+                "status": subscription.status.value,
+                "current_period_end": subscription.current_period_end.isoformat(),
+                "cancel_at_period_end": subscription.cancel_at_period_end
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Erreur récupération statut abonnement: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erreur serveur"
+        )
