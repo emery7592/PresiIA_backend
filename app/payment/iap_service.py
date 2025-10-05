@@ -1,5 +1,4 @@
 import requests
-import jwt
 import time
 import os
 import logging
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 from google.auth.transport import requests as google_requests
 from google.oauth2 import service_account
+from jose import jwt
 
 from app.auth.models import User, Subscription, Payment, SubscriptionStatusEnum, PaymentStatusEnum
 
