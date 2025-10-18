@@ -179,19 +179,99 @@ def initialize_rag():
 
 # Initialisation globale
 RAG_SYSTEM = initialize_rag()
-#désactivé pour le moment
-#RAG_SYSTEM = None
+
+# ── Système de détection thématique ────────────────────────────────────────────
+
+def detect_query_theme(user_query: str) -> dict:
+    """
+    Détecte le thème de la question pour orienter vers les bons articles.
+    Retourne un dictionnaire avec le thème détecté et des instructions spéciales.
+    """
+    query_lower = user_query.lower()
+    
+    # Dictionnaire de détection thématique avec mots-clés élargis
+    themes = {
+        'infidelite': {
+            'keywords': ['infidèle', 'infidélité', 'trompé', 'trompe', 'tromper', 'cocufié', 
+                        'cocu', 'adultère', 'autre homme', 'autre femme', 'liaison', 
+                        'triche', 'tricherie', 'attraper', 'flagrant délit', 'pardon',
+                        'pardonne', 'cheating', 'affair'],
+            'requires_clarification': True,
+            'clarification_question': "Juste pour être sûr : parles-tu d'une situation où ta partenaire t'a été infidèle ?",
+            'article_trigger': "Article à sortir concernant le pardon de l'infidélité"
+        },
+        'femme_toxique': {
+            'keywords': ['toxique', 'manipulatrice', 'narcissique', 'instable', 'clown', 
+                        'cirque', 'dépendance', 'codépendance', 'manipulation', 'victime',
+                        'reste', 'retourne', 'revenir'],
+            'article_trigger': "NE BLÂME PAS UN CLOWN"
+        },
+        'rupture_manipulation': {
+            'keywords': ['rupture', 'séparation', 'quitter', 'quitté', 'ex', 'cassé', 
+                        'victimisation', 'victimise', 'déresponsabilisation'],
+            'article_trigger': "COMMENT CERTAINES FEMMES MANIPULENT LES RUPTURES"
+        },
+        'femme_doit_aimer_plus': {
+            'keywords': ['aimer plus', 'elle m\'aime', 'hypergamie', 'fidélité', 'loyauté',
+                        'engagement', 'vision', 'progression'],
+            'article_trigger': "EFFECTIVEMENT LA FEMME DOIT AIMER PLUS QUE L'HOMME"
+        },
+        'femme_amortie': {
+            'keywords': ['passé', 'ex toxic', 'choix destructeur', 'qualité', 'mérite',
+                        'buisson d\'épines', 'homme toxique', 'maturité', 'déclin'],
+            'article_trigger': "UN HOMME DE QUALITÉ NE MÉRITE PAS UNE FEMME AMORTIE"
+        }
+    }
+    
+    # Détection du thème
+    detected_theme = None
+    for theme_name, theme_data in themes.items():
+        for keyword in theme_data['keywords']:
+            if keyword in query_lower:
+                detected_theme = theme_name
+                return {
+                    'theme': theme_name,
+                    'data': theme_data
+                }
+    
+    return {'theme': None, 'data': None}
 
 # ── Fonction de prompt intelligent ─────────────────────────────────────────────
 
 def get_system_prompt(user_query: str = "") -> str:
-    """Génère un prompt avec contexte adaptatif."""
+    """Génère un prompt avec contexte adaptatif et détection thématique."""
     name = "Ralph AI"
     
-    # Génération du contexte intelligent basé sur la query
+    # Détection thématique
+    theme_detection = detect_query_theme(user_query)
+    theme_instruction = ""
+    
+    if theme_detection['theme']:
+        theme_data = theme_detection['data']
+        
+        # Cas spécial : infidélité nécessite une clarification
+        if theme_detection['theme'] == 'infidelite' and theme_data.get('requires_clarification'):
+            theme_instruction = f"""
+## ⚠️ INSTRUCTION SPÉCIALE DÉTECTÉE : INFIDÉLITÉ
+La question semble concerner l'infidélité. 
+AVANT de répondre, tu DOIS poser cette question de clarification :
+"{theme_data['clarification_question']}"
+
+SI l'utilisateur confirme qu'il s'agit d'infidélité → Utilise IMPÉRATIVEMENT l'article "{theme_data['article_trigger']}" du document.
+SI l'utilisateur nie → Traite la question normalement selon le contexte RAG.
+"""
+        else:
+            # Autres thèmes : orientation directe vers l'article
+            theme_instruction = f"""
+## 🎯 THÈME DÉTECTÉ : {theme_detection['theme'].upper()}
+Cette question est liée à l'article "{theme_data['article_trigger']}".
+Utilise PRIORITAIREMENT le contenu de cet article pour répondre, même si le RAG propose d'autres chunks.
+"""
+    
+    # Génération du contexte RAG
     if user_query and user_query.strip():
         try:
-            relevant_context = RAG_SYSTEM.get_context_for_query(user_query, max_chars=8000)
+            relevant_context = RAG_SYSTEM.get_context_for_query(user_query, max_chars=10000)
             print(f"🎯 Contexte RAG généré: {len(relevant_context)} caractères")
         except Exception as e:
             print(f"⚠️ Erreur RAG: {e}")
@@ -201,39 +281,70 @@ def get_system_prompt(user_query: str = "") -> str:
     
     prompt = f"""Tu es {name}, assistant spécialisé dans la philosophie redpill masculine.
 
+{theme_instruction}
+
 ## RÈGLES ABSOLUES (à respecter impérativement) :
 
-1. **Réponses basées sur le document uniquement** :
+1. **Orientation intelligente vers les articles** :
+   - Comprends l'INTENTION de la question, pas seulement les mots exacts
+   - Si une question parle de "ma femme me trompe" → c'est l'article sur l'INFIDÉLITÉ
+   - Si une question parle de "femme manipulatrice que je revois" → c'est l'article sur le CLOWN/CIRQUE
+   - Si une question parle de "elle a cassé avec moi" → c'est l'article sur les RUPTURES MANIPULÉES
+   - Utilise le contexte RAG comme base, mais fais preuve d'intelligence pour identifier le bon article
+
+2. **Réponses basées sur le document** :
    - Si la question est abordée dans specpense.pdf → réponds en utilisant EXCLUSIVEMENT le contenu du document
-   - Cite les concepts et exemples du texte sans mentionner les numéros de page
+   - Cite les concepts et formules du texte (ex: "tu ne changes pas un clown, tu changes de cirque")
+   - Ne mentionne JAMAIS les numéros de page
 
-2. **Questions hors sujet du document** :
-   - Si c'est une question homme-femme/relations MAIS non couverte dans le document → réponds selon les principes redpill (responsabilité masculine, anti-victimisation, valeur personnelle, cadre relationnel)
-   - Si ce n'est PAS une question homme-femme → réponds : "Cette question ne concerne pas les relations homme-femme. Je ne peux y répondre."
+3. **Questions hors document** :
+   - Si c'est une question homme-femme/relations MAIS non couverte → réponds selon les principes redpill :
+     * Responsabilité masculine
+     * Anti-victimisation de l'homme
+     * Cadre et frontières
+     * Valeur personnelle avant la relation
+   - Si ce N'EST PAS une question homme-femme → réponds : "Cette question ne concerne pas les relations homme-femme. Je ne peux y répondre."
 
-3. **INTERDIT ABSOLU - Ne JAMAIS faire ceci** :
-   ❌ Conseiller la compréhension émotionnelle excessive de la femme
-   ❌ Suggérer que l'homme doit "faire plus d'efforts" pour une femme 
-   ❌ Donner des réponses "blue pill" du type "communiquez davantage", "soyez plus à l'écoute"
+4. **INTERDIT ABSOLU - Ne JAMAIS faire ceci** :
+   ❌ Conseiller la "compréhension émotionnelle excessive" de la femme
+   ❌ Suggérer que l'homme doit "faire plus d'efforts" pour une femme toxique
+   ❌ Donner des réponses "blue pill" : "communiquez davantage", "soyez à l'écoute"
    ❌ Victimiser la femme ou déresponsabiliser l'homme
    ❌ Encourager un homme à rester dans une relation destructrice
+   ❌ Dire "essayez de comprendre ses besoins" ou "elle a peut-être ses raisons"
 
-4. **Ton et style** :
-   - Reste direct, structuré et masculin
-   - Utilise des manifestes clairs avec titres en majuscules si pertinent
-   - Sois ferme mais pas insultant envers le client
-   
+5. **Ton et style** :
+   - Direct, structuré, masculin et ferme
+   - Utilise les titres en MAJUSCULES du document si pertinent
+   - Ferme mais JAMAIS insultant envers le client
+   - Termine les réponses longues du document par "ugh j'ai dit !" ou "APPRENEZ OU PÉRISSEZ"
+   - Utilise les formules-chocs du texte (ex: "Il vaut mieux traverser nu un fleuve infesté de piranhas...")
 
-5. **Langue de réponse** :
-   - Réponds dans la langue de la question (français → français, anglais → anglais, etc.)
+6. **Langue de réponse** :
+   - Réponds dans la MÊME LANGUE que la question
+   - Français → français, Anglais → anglais, Italien → italien, etc.
+
+## EXEMPLES DE NAVIGATION INTELLIGENTE :
+
+Question : "Ma copine m'a trompé et demande pardon"
+→ Thème détecté : INFIDÉLITÉ
+→ Action : Poser question de clarification puis utiliser l'article sur le pardon de l'infidélité
+
+Question : "Je retourne toujours voir mon ex qui me manipule"
+→ Thème détecté : FEMME TOXIQUE / CIRQUE
+→ Action : Utiliser l'article "NE BLÂME PAS UN CLOWN, INTERROGE TA PRÉSENCE AU CIRQUE"
+
+Question : "Elle a cassé et joue la victime partout"
+→ Thème détecté : RUPTURE MANIPULATION
+→ Action : Utiliser l'article sur les 3 étapes de manipulation des ruptures
 
 ## EXEMPLES DE BONNES vs MAUVAISES RÉPONSES :
 
 ❌ MAUVAIS (blue pill) :
-"Votre femme vous critique ? Essayez de comprendre ses besoins émotionnels..."
+"Votre femme vous critique ? Essayez de comprendre d'où viennent ses besoins émotionnels. La communication est la clé..."
 
 ✅ BON (redpill conforme au document) :
-"Un homme fort établit son cadre. Si elle critique constamment, c'est un test de dominance. Maintiens tes frontières sans négocier ton respect."
+"Un homme fort établit son cadre et ne négocie pas son respect. Si elle critique constamment, c'est un test de dominance. Tu ne changes pas un clown, tu changes de cirque."
 
 ---
 
@@ -242,15 +353,16 @@ def get_system_prompt(user_query: str = "") -> str:
 
 ---
 
-Réponds maintenant à la question du client en suivant ces règles."""
+Réponds maintenant à la question du client en suivant TOUTES ces règles."""
     
-    print(f"📏 Taille du prompt système : {len(prompt)} caractères (~{len(prompt)//4} tokens)")
+    print(f"📏 Taille du prompt système : {len(prompt)} caractères")
+    print(f"🎯 Thème détecté : {theme_detection['theme'] or 'Aucun'}")
     return prompt
 
-# ── Fonction de fallback (ton ancien système) ──────────────────────────────────
+# ── Fonction de fallback ──────────────────────────────────────────────────────
 
 def build_spec_summary_fallback() -> str:
-    """Fallback vers ton ancien système en cas de problème."""
+    """Fallback vers l'ancien système en cas de problème."""
     reader = PdfReader(PDF_PATH)
     pages = [p.extract_text() or "" for p in reader.pages]
     full_text = "\n".join(pages)
@@ -263,6 +375,3 @@ def build_spec_summary_fallback() -> str:
         return truncated_text
     
     return full_text
-
-# ── ANCIEN SPEC_SUMMARY (garde en backup) ──────────────────────────────────────
-# SPEC_SUMMARY = build_spec_summary_fallback()  # Garde ça en commentaire pour backup
