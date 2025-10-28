@@ -1,5 +1,22 @@
+
+# Python
 venv/
 __pycache__/
 *.py[cod]
+
+# Environment variables
 .env
-**/*.pdf 
+
+# PDF files
+**/*.pdf
+
+# Google Service Account JSON (IMPORTANT: Ne jamais commit ce fichier!)
+*service-account*.json
+*serviceaccount*.json
+*-backend-*.json
+redpill-ia-backend-*.json
+
+# Autres secrets potentiels
+*.pem
+*.key
+*.p12
