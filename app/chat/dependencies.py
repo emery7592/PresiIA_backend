@@ -236,11 +236,63 @@ def detect_query_theme(user_query: str) -> dict:
     
     return {'theme': None, 'data': None}
 
+def is_greeting_or_intro(user_query: str) -> bool:
+    """
+    Détecte si c'est un message de salutation ou une demande de présentation.
+    """
+    query_lower = user_query.lower().strip()
+    
+    greetings = [
+        'bonjour', 'salut', 'hello', 'hey', 'hi', 'bonsoir', 'coucou',
+        'qui es-tu', 'qui es tu', 'c\'est quoi', 'présente-toi', 'présente toi',
+        'tu es qui', 'tu fais quoi', 'what are you', 'who are you',
+        'pourquoi toi', 'quelle différence', 'différence avec chatgpt',
+        'pourquoi pas chatgpt', 'en quoi tu es différent'
+    ]
+    
+    for greeting in greetings:
+        if greeting in query_lower:
+            return True
+    
+    # Si le message est très court (moins de 20 caractères), c'est probablement une salutation
+    if len(query_lower) < 20 and any(word in query_lower for word in ['salut', 'hello', 'bonjour', 'hey']):
+        return True
+    
+    return False
+
 # ── Fonction de prompt intelligent ─────────────────────────────────────────────
 
 def get_system_prompt(user_query: str = "") -> str:
     """Génère un prompt avec contexte adaptatif et détection thématique."""
     name = "Ralph AI"
+    
+    # Détection des salutations et demandes de présentation
+    if is_greeting_or_intro(user_query):
+        intro_instruction = """
+## 🎯 MESSAGE DE PRÉSENTATION DÉTECTÉ
+
+L'utilisateur te salue ou te demande qui tu es. Réponds avec CE MESSAGE EXACT (adapté à la langue de la question) :
+
+"Excellente question ! 🎯
+
+Les IA généralistes comme ChatGPT vous donnent des réponses politiquement correctes qui ne servent à rien. Moi, je vous dis la vérité, même si elle dérange.
+
+Voici pourquoi je suis différent :
+
+✅ **La vérité avant le consensus** : Je n'ai pas de filtre "blue pill". Je vous explique les vraies dynamiques relationnelles, pas ce que la société veut entendre
+
+✅ **Expertise pure relations** : Spécialisé à 100% dans les relations homme-femme, l'attraction et la psychologie féminine. Pas de connaissances généralistes diluées
+
+✅ **Stratégies qui marchent vraiment** : Des plans d'action concrets basés sur ce qui fonctionne réellement, pas sur des théories romantiques déconnectées
+
+Si vous en avez marre des conseils mièvres qui ne donnent aucun résultat, je suis fait pour vous.
+
+Prêt à avoir des réponses qui changent vraiment la donne ? 💪"
+
+N'AJOUTE RIEN d'autre, utilise CE MESSAGE tel quel (traduit si nécessaire).
+"""
+    else:
+        intro_instruction = ""
     
     # Détection thématique
     theme_detection = detect_query_theme(user_query)
@@ -269,7 +321,7 @@ Utilise PRIORITAIREMENT le contenu de cet article pour répondre, même si le RA
 """
     
     # Génération du contexte RAG
-    if user_query and user_query.strip():
+    if user_query and user_query.strip() and not is_greeting_or_intro(user_query):
         try:
             relevant_context = RAG_SYSTEM.get_context_for_query(user_query, max_chars=10000)
             print(f"🎯 Contexte RAG généré: {len(relevant_context)} caractères")
@@ -277,9 +329,11 @@ Utilise PRIORITAIREMENT le contenu de cet article pour répondre, même si le RA
             print(f"⚠️ Erreur RAG: {e}")
             relevant_context = "Contexte non disponible"
     else:
-        relevant_context = "Contexte sera généré selon votre question"
+        relevant_context = "Pas de contexte nécessaire pour ce type de message"
     
     prompt = f"""Tu es {name}, assistant spécialisé dans la philosophie redpill masculine.
+
+{intro_instruction}
 
 {theme_instruction}
 
@@ -317,6 +371,7 @@ Utilise PRIORITAIREMENT le contenu de cet article pour répondre, même si le RA
    - Direct, structuré, masculin et ferme
    - Utilise les titres en MAJUSCULES du document si pertinent
    - Ferme mais JAMAIS insultant envers le client
+   - Termine les réponses longues du document par "ugh j'ai dit !" ou "APPRENEZ OU PÉRISSEZ"
    - Utilise les formules-chocs du texte (ex: "Il vaut mieux traverser nu un fleuve infesté de piranhas...")
 
 6. **Langue de réponse** :
@@ -356,6 +411,7 @@ Réponds maintenant à la question du client en suivant TOUTES ces règles."""
     
     print(f"📏 Taille du prompt système : {len(prompt)} caractères")
     print(f"🎯 Thème détecté : {theme_detection['theme'] or 'Aucun'}")
+    print(f"👋 Salutation détectée : {'Oui' if is_greeting_or_intro(user_query) else 'Non'}")
     return prompt
 
 # ── Fonction de fallback ──────────────────────────────────────────────────────
