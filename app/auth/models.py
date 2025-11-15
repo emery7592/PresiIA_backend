@@ -41,37 +41,22 @@ class User(Base):
     is_registered = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Nouvelle colonne pour Stripe
-    stripe_customer_id = Column(String(255), nullable=True)
-    
+
     # Relations
     subscriptions = relationship("Subscription", back_populates="user")
     payments = relationship("Payment", back_populates="user")
 
-# Classe Subscription
+# Classe Subscription - Simplifié pour RevenueCat
 class Subscription(Base):
     __tablename__ = "subscriptions"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    
-    # Stripe (garder)
-    stripe_subscription_id = Column(String(255), unique=True, nullable=True)
-    stripe_price_id = Column(String(255), nullable=True)
-    
-    # IAP Apple
-    apple_transaction_id = Column(String(255), unique=True, nullable=True)
-    apple_original_transaction_id = Column(String(255), nullable=True)
-    apple_product_id = Column(String(255), nullable=True)
-    
-    # IAP Google
-    google_purchase_token = Column(String(1000), unique=True, nullable=True)
-    google_order_id = Column(String(255), nullable=True)
-    google_product_id = Column(String(255), nullable=True)
-    
+
+    # RevenueCat (unifié pour tous les stores)
+    platform_source = Column(String(50), default="revenuecat")
+
     # Commun
-    platform_source = Column(String(50), nullable=True)
     status = Column(Enum(SubscriptionStatusEnum), default=SubscriptionStatusEnum.active)
     current_period_start = Column(DateTime(timezone=True), nullable=False)
     current_period_end = Column(DateTime(timezone=True), nullable=False)
@@ -79,7 +64,7 @@ class Subscription(Base):
     canceled_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     user = relationship("User", back_populates="subscriptions")
     payments = relationship("Payment", back_populates="subscription")
 

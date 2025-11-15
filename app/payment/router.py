@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 import logging
@@ -6,270 +6,183 @@ import os
 
 from app.database.database import get_database
 from app.payment.schemas import (
-    PaymentIntentRequest, 
-    PaymentIntentResponse,
-    AppleReceiptRequest,
-    GooglePurchaseRequest,
-    IAPVerificationResponse
+    IAPVerificationResponse,
+    RevenueCatPurchaseRequest
 )
 from app.auth.dependencies import require_auth
 from app.auth.models import User, Payment, Subscription, SubscriptionStatusEnum, PlatformEnum
-from app.payment.services import (
-    create_payment_intent_service,
-    get_user_subscription,
-    handle_stripe_webhook
-)
-from app.payment.iap_service import (
-    create_or_update_subscription_from_apple,
-    create_or_update_subscription_from_google
-)
+from app.payment.revenuecat_service import revenuecat_service
 from app.auth.services import hash_password, create_access_token
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/payment", tags=["payment"])
 
-@router.post("/create-intent", response_model=PaymentIntentResponse)
-async def create_payment_intent(
-    request: PaymentIntentRequest,
+@router.post("/verify-purchase", response_model=IAPVerificationResponse)
+async def verify_revenuecat_purchase(
+    request: RevenueCatPurchaseRequest,
     db: Session = Depends(get_database)
 ):
+    """
+    Vérifie l'achat RevenueCat et crée le compte utilisateur
+    """
     try:
-        existing_user = db.query(User).filter(User.email == request.email).first()
-        if existing_user and existing_user.is_registered:
-            return PaymentIntentResponse(
+        # 1. Vérifier si email existe déjà
+        existing_user = db.query(User).filter(
+            User.email == request.email,
+            User.is_registered == True
+        ).first()
+
+        if existing_user:
+            return IAPVerificationResponse(
                 success=False,
-                error="Un utilisateur avec cet email existe déjà",
-                message="Email déjà utilisé"
+                message="Un compte existe déjà avec cet email",
+                error="EMAIL_EXISTS"
             )
-        
-        user_data = {
-            "email": request.email,
-            "firstName": request.firstName,
-            "lastName": request.lastName,
-            "device_id": request.device_id,
-            "platform": request.platform,
-            "password": request.password
-        }
-        
-        result = create_payment_intent_service(db, user_data)
-        
-        return PaymentIntentResponse(
-            success=True,
-            client_secret=result["client_secret"],
-            message="PaymentIntent créé avec succès"
+
+        # 2. Vérifier l'abonnement via RevenueCat
+        # Utiliser l'email comme app_user_id (ou device_id selon ta config RevenueCat)
+        subscription_info = await revenuecat_service.verify_purchase(request.email)
+
+        if not subscription_info or not subscription_info.get("is_active"):
+            return IAPVerificationResponse(
+                success=False,
+                message="Aucun abonnement actif trouvé",
+                error="NO_ACTIVE_SUBSCRIPTION"
+            )
+
+        # 3. Créer l'utilisateur
+        user = User(
+            email=request.email,
+            first_name=request.first_name,
+            last_name=request.last_name,
+            device_id=request.device_id,
+            platform=PlatformEnum.android,
+            password_hash=hash_password(request.password),
+            is_registered=True
         )
-        
-    except Exception as e:
-        logger.error(f"Erreur lors de la création du PaymentIntent: {e}")
-        return PaymentIntentResponse(
-            success=False,
-            error=str(e),
-            message="Erreur lors de la création du paiement"
+        db.add(user)
+        db.flush()  # Pour obtenir l'ID
+
+        # 4. Créer l'abonnement dans la base
+        subscription = Subscription(
+            user_id=user.id,
+            platform_source="revenuecat",
+            status=SubscriptionStatusEnum.active,
+            current_period_start=datetime.fromisoformat(
+                subscription_info["original_purchase_date"].replace("Z", "+00:00")
+            ),
+            current_period_end=subscription_info["expires_date"]
+        )
+        db.add(subscription)
+        db.commit()
+        db.refresh(user)
+
+        # 5. Générer le token JWT
+        token = create_access_token({"sub": str(user.id)})
+
+        return IAPVerificationResponse(
+            success=True,
+            message="Compte créé et abonnement activé",
+            token=token,
+            user={
+                "id": str(user.id),
+                "email": user.email,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "is_premium": True
+            },
+            subscription={
+                "id": str(subscription.id),
+                "status": subscription.status.value,
+                "expires_at": subscription.current_period_end.isoformat()
+            }
         )
 
-@router.post("/webhook")
-async def stripe_webhook(
-    request: Request,
-    stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")
-):
-    try:
-        if not stripe_signature:
-            logger.error("Signature Stripe manquante dans les headers")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Signature Stripe manquante"
-            )
-        
-        payload = await request.body()
-        logger.info(f"Webhook reçu avec signature: {stripe_signature[:20]}...")
-        
-        db = next(get_database())
-        try:
-            result = handle_stripe_webhook(payload, stripe_signature, db)
-            db.close()
-        except Exception as e:
-            db.close()
-            raise e
-        
-        return {"status": "success", "event_type": result["event_type"]}
-        
     except Exception as e:
-        logger.error(f"Erreur lors du traitement du webhook: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Erreur lors du traitement du webhook: {str(e)}"
+        logger.error(f"Erreur vérification RevenueCat: {e}")
+        db.rollback()
+        return IAPVerificationResponse(
+            success=False,
+            message="Erreur lors de la vérification",
+            error=str(e)
         )
+
+
+@router.post("/webhook/revenuecat")
+async def revenuecat_webhook(
+    request: Request,
+    db: Session = Depends(get_database)
+):
+    """Webhook pour les événements RevenueCat"""
+    try:
+        payload = await request.json()
+        event_type = payload.get("type")
+
+        logger.info(f"Webhook RevenueCat reçu: {event_type}")
+
+        # Récupérer les informations de l'événement
+        event_data = payload.get("event", {})
+        app_user_id = event_data.get("app_user_id")
+        product_id = event_data.get("product_id")
+
+        if not app_user_id:
+            logger.error("app_user_id manquant dans le webhook")
+            return {"status": "error", "message": "app_user_id manquant"}
+
+        # Récupérer l'utilisateur (app_user_id devrait être l'email)
+        user = db.query(User).filter(User.email == app_user_id).first()
+
+        if not user:
+            logger.warning(f"Utilisateur non trouvé pour app_user_id: {app_user_id}")
+            return {"status": "error", "message": "Utilisateur non trouvé"}
+
+        # Récupérer l'abonnement actif
+        subscription = db.query(Subscription).filter(
+            Subscription.user_id == user.id,
+            Subscription.status == SubscriptionStatusEnum.active
+        ).first()
+
+        if event_type == "RENEWAL":
+            # Mettre à jour current_period_end
+            if subscription:
+                expiration_date = event_data.get("expiration_at_ms")
+                if expiration_date:
+                    subscription.current_period_end = datetime.fromtimestamp(int(expiration_date) / 1000)
+                    db.commit()
+                    logger.info(f"Abonnement renouvelé pour {app_user_id}")
+
+        elif event_type == "CANCELLATION":
+            # Marquer cancel_at_period_end = True
+            if subscription:
+                subscription.cancel_at_period_end = True
+                subscription.canceled_at = datetime.utcnow()
+                db.commit()
+                logger.info(f"Abonnement annulé pour {app_user_id}")
+
+        elif event_type == "EXPIRATION":
+            # Mettre status = inactive
+            if subscription:
+                subscription.status = SubscriptionStatusEnum.inactive
+                db.commit()
+                logger.info(f"Abonnement expiré pour {app_user_id}")
+
+        return {"status": "success"}
+
+    except Exception as e:
+        logger.error(f"Erreur webhook RevenueCat: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.get("/health")
 async def payment_health_check():
+    """Vérification de santé du module de paiement"""
     return {
         "status": "healthy",
         "module": "payment",
-        "stripe_configured": bool(os.getenv("STRIPE_SECRET_KEY"))
+        "revenuecat_configured": bool(os.getenv("REVENUECAT_API_KEY"))
     }
-
-@router.get("/status/{payment_intent_id}")
-async def check_payment_status(
-    payment_intent_id: str,
-    db: Session = Depends(get_database)
-):
-    try:
-        payment = db.query(Payment).filter(
-            Payment.stripe_payment_intent_id == payment_intent_id
-        ).first()
-        
-        if payment:
-            return {"success": True, "message": "Paiement confirmé"}
-        else:
-            return {"success": False, "message": "Paiement en attente"}
-    except Exception as e:
-        return {"success": False, "message": "Erreur vérification"}
-
-@router.post("/verify/apple", response_model=IAPVerificationResponse)
-async def verify_apple_purchase(
-    request: AppleReceiptRequest,
-    db: Session = Depends(get_database)
-):
-    try:
-        # Récupérer l'utilisateur par device_id
-        user = db.query(User).filter(User.device_id == request.device_id).first()
-        
-        if not user:
-            # Vérifier si email existe déjà
-            existing_email = db.query(User).filter(User.email == request.email).first()
-            if existing_email:
-                return IAPVerificationResponse(
-                    success=False,
-                    message="Email déjà utilisé",
-                    error="EMAIL_EXISTS"
-                )
-            
-            # Créer le nouvel utilisateur
-            logger.info(f"Création nouvel utilisateur iOS: {request.email}")
-            
-            user = User(
-                email=request.email,
-                first_name=request.first_name,
-                last_name=request.last_name,
-                device_id=request.device_id,
-                platform=PlatformEnum.ios,
-                password_hash=hash_password(request.password),
-                is_registered=True
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            
-            logger.info(f"Utilisateur créé avec succès: {user.id}")
-        
-        # Créer/mettre à jour l'abonnement
-        subscription = create_or_update_subscription_from_apple(
-            db, user, request.receipt_data
-        )
-        
-        # Générer token JWT pour login automatique
-        token = create_access_token({"sub": str(user.id)})
-        
-        return IAPVerificationResponse(
-            success=True,
-            message="Abonnement Apple vérifié et compte créé",
-            token=token,
-            user={
-                "id": str(user.id),
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "is_premium": True
-            },
-            subscription={
-                "id": str(subscription.id),
-                "status": subscription.status.value,
-                "expires_at": subscription.current_period_end.isoformat()
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"Erreur vérification Apple: {e}")
-        db.rollback()
-        return IAPVerificationResponse(
-            success=False,
-            message="Erreur lors de la vérification",
-            error=str(e)
-        )
-
-
-@router.post("/verify/google", response_model=IAPVerificationResponse)
-async def verify_google_purchase(
-    request: GooglePurchaseRequest,
-    db: Session = Depends(get_database)
-):
-    try:
-        # Récupérer l'utilisateur par device_id
-        user = db.query(User).filter(User.device_id == request.device_id).first()
-        
-        if not user:
-            # Vérifier si email existe déjà
-            existing_email = db.query(User).filter(User.email == request.email).first()
-            if existing_email:
-                return IAPVerificationResponse(
-                    success=False,
-                    message="Email déjà utilisé",
-                    error="EMAIL_EXISTS"
-                )
-            
-            # Créer le nouvel utilisateur
-            logger.info(f"Création nouvel utilisateur Android: {request.email}")
-            
-            user = User(
-                email=request.email,
-                first_name=request.first_name,
-                last_name=request.last_name,
-                device_id=request.device_id,
-                platform=PlatformEnum.android,
-                password_hash=hash_password(request.password),
-                is_registered=True
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            
-            logger.info(f"Utilisateur créé avec succès: {user.id}")
-        
-        # Créer/mettre à jour l'abonnement
-        subscription = create_or_update_subscription_from_google(
-            db, user, request.purchase_token, request.product_id
-        )
-        
-        # Générer token JWT pour login automatique
-        token = create_access_token({"sub": str(user.id)})
-        
-        return IAPVerificationResponse(
-            success=True,
-            message="Abonnement Google vérifié et compte créé",
-            token=token,
-            user={
-                "id": str(user.id),
-                "email": user.email,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "is_premium": True
-            },
-            subscription={
-                "id": str(subscription.id),
-                "status": subscription.status.value,
-                "expires_at": subscription.current_period_end.isoformat()
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"Erreur vérification Google: {e}")
-        db.rollback()
-        return IAPVerificationResponse(
-            success=False,
-            message="Erreur lors de la vérification",
-            error=str(e)
-        )
 
 
 @router.get("/subscription/status")
@@ -277,18 +190,19 @@ async def get_subscription_status(
     current_user: User = Depends(require_auth),
     db: Session = Depends(get_database)
 ):
+    """Récupère le statut de l'abonnement de l'utilisateur"""
     try:
         subscription = db.query(Subscription).filter(
             Subscription.user_id == current_user.id,
             Subscription.status == SubscriptionStatusEnum.active
         ).first()
-        
+
         if not subscription:
             return {
                 "has_subscription": False,
                 "message": "Aucun abonnement actif"
             }
-        
+
         return {
             "has_subscription": True,
             "subscription": {
@@ -299,7 +213,7 @@ async def get_subscription_status(
                 "cancel_at_period_end": subscription.cancel_at_period_end
             }
         }
-        
+
     except Exception as e:
         logger.error(f"Erreur récupération statut abonnement: {e}")
         raise HTTPException(

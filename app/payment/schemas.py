@@ -108,3 +108,17 @@ class IAPVerificationResponse(BaseModel):
     # NOUVEAUX CHAMPS
     token: Optional[str] = None
     user: Optional[dict] = None
+
+class RevenueCatPurchaseRequest(BaseModel):
+    email: EmailStr
+    password: str
+    first_name: str
+    last_name: str
+    device_id: str
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 6:
+            raise ValueError('Password must be at least 6 characters')
+        return v
