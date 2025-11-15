@@ -14,7 +14,7 @@ class RevenueCatService:
     def __init__(self):
         self.api_key = os.getenv("REVENUECAT_API_KEY")
         if not self.api_key:
-            raise ValueError("REVENUECAT_API_KEY manquante dans .env")
+            logger.warning("REVENUECAT_API_KEY manquante dans .env - le service ne fonctionnera pas")
 
     async def verify_purchase(self, app_user_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -26,6 +26,10 @@ class RevenueCatService:
         Returns:
             Dict contenant les infos d'abonnement ou None si pas d'abonnement actif
         """
+        if not self.api_key:
+            logger.error("REVENUECAT_API_KEY non configurée - impossible de vérifier l'achat")
+            return None
+
         try:
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
