@@ -1,1 +1,1 @@
-# Module de paiement Stripe
+# Module de paiement RevenueCat
