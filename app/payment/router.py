@@ -42,15 +42,18 @@ async def verify_revenuecat_purchase(
             )
 
         # 2. Vérifier l'abonnement via RevenueCat
-        # Utiliser l'email comme app_user_id (ou device_id selon ta config RevenueCat)
+        logger.info(f"Vérification abonnement pour: {request.email}")
         subscription_info = await revenuecat_service.verify_purchase(request.email)
 
         if not subscription_info or not subscription_info.get("is_active"):
+            logger.error(f"Pas d'abonnement actif pour: {request.email}")
             return IAPVerificationResponse(
                 success=False,
                 message="Aucun abonnement actif trouvé",
                 error="NO_ACTIVE_SUBSCRIPTION"
             )
+
+        logger.info(f"✅ Abonnement vérifié pour: {request.email}")
 
         # 3. Créer l'utilisateur
         user = User(
@@ -65,19 +68,30 @@ async def verify_revenuecat_purchase(
         db.add(user)
         db.flush()  # Pour obtenir l'ID
 
-        # 4. Créer l'abonnement dans la base
+        # 4. Créer l'abonnement dans la base (CORRIGÉ)
+        original_purchase = subscription_info.get("original_purchase_date")
+        if original_purchase:
+            try:
+                period_start = datetime.fromisoformat(original_purchase.replace("Z", "+00:00"))
+            except Exception as e:
+                logger.warning(f"Erreur parsing date: {e}, utilisation date actuelle")
+                period_start = datetime.utcnow()
+        else:
+            logger.info("Pas de original_purchase_date, utilisation date actuelle")
+            period_start = datetime.utcnow()
+
         subscription = Subscription(
             user_id=user.id,
             platform_source="revenuecat",
             status=SubscriptionStatusEnum.active,
-            current_period_start=datetime.fromisoformat(
-                subscription_info["original_purchase_date"].replace("Z", "+00:00")
-            ),
+            current_period_start=period_start,
             current_period_end=subscription_info["expires_date"]
         )
         db.add(subscription)
         db.commit()
         db.refresh(user)
+
+        logger.info(f"✅ Compte créé: {user.email}")
 
         # 5. Générer le token JWT
         token = create_access_token({"sub": str(user.id)})
