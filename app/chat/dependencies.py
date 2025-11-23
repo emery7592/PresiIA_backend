@@ -34,7 +34,7 @@ class DocumentChunk:
     chunk_id: int
 
 class SimpleRAG:
-    """Version simplifiée du système RAG pour ton cas d'usage."""
+    """Version simplifiée du système RAG pour ton cas d usage."""
     
     def __init__(self, pdf_path: str):
         self.pdf_path = pdf_path
@@ -77,7 +77,7 @@ class SimpleRAG:
         texts = [chunk.content for chunk in self.chunks]
         embeddings = self.embedding_model.encode(texts, show_progress_bar=True)
         
-        # Création de l'index FAISS
+        # Création de l index FAISS
         dimension = embeddings.shape[1]
         self.index = faiss.IndexFlatIP(dimension)
         
@@ -91,7 +91,7 @@ class SimpleRAG:
     def search_relevant_chunks(self, query: str, top_k: int = 5) -> List[Tuple[DocumentChunk, float]]:
         """Recherche les chunks les plus pertinents."""
         if self.index is None:
-            raise ValueError("Index non créé. Appelez build_embeddings() d'abord.")
+            raise ValueError("Index non créé. Appelez build_embeddings() d abord.")
         
         query_embedding = self.embedding_model.encode([query])
         faiss.normalize_L2(query_embedding)
@@ -124,7 +124,7 @@ class SimpleRAG:
         return "\n---\n".join(context_parts)
     
     def save_index(self, base_path: str):
-        """Sauvegarde l'index."""
+        """Sauvegarde l index."""
         faiss.write_index(self.index, f"{base_path}.faiss")
         
         chunks_data = []
@@ -162,10 +162,10 @@ def initialize_rag():
     
     rag = SimpleRAG(str(PDF_PATH))
     
-    # Vérifier si l'index existe
+    # Vérifier si l index existe
     if (Path(f"{index_path}.faiss").exists() and 
         Path(f"{index_path}_chunks.json").exists()):
-        print("📚 Chargement de l'index RAG existant...")
+        print("📚 Chargement de l index RAG existant...")
         rag.load_index(str(index_path))
         print(f"✅ Index chargé: {len(rag.chunks)} chunks disponibles")
     else:
@@ -197,8 +197,8 @@ def detect_query_theme(user_query: str) -> dict:
                         'triche', 'tricherie', 'attraper', 'flagrant délit', 'pardon',
                         'pardonne', 'cheating', 'affair'],
             'requires_clarification': True,
-            'clarification_question': "Juste pour être sûr : parles-tu d'une situation où ta partenaire t'a été infidèle ?",
-            'article_trigger': "Article à sortir concernant le pardon de l'infidélité"
+            'clarification_question': "Juste pour être sûr : parles-tu d une situation où ta partenaire t a été infidèle ?",
+            'article_trigger': "Article à sortir concernant le pardon de l infidélité"
         },
         'femme_toxique': {
             'keywords': ['toxique', 'manipulatrice', 'narcissique', 'instable', 'clown', 
@@ -212,13 +212,13 @@ def detect_query_theme(user_query: str) -> dict:
             'article_trigger': "COMMENT CERTAINES FEMMES MANIPULENT LES RUPTURES"
         },
         'femme_doit_aimer_plus': {
-            'keywords': ['aimer plus', 'elle m\'aime', 'hypergamie', 'fidélité', 'loyauté',
+            'keywords': ['aimer plus', 'elle m aime', 'hypergamie', 'fidélité', 'loyauté',
                         'engagement', 'vision', 'progression'],
-            'article_trigger': "EFFECTIVEMENT LA FEMME DOIT AIMER PLUS QUE L'HOMME"
+            'article_trigger': "EFFECTIVEMENT LA FEMME DOIT AIMER PLUS QUE L HOMME"
         },
         'femme_amortie': {
             'keywords': ['passé', 'ex toxic', 'choix destructeur', 'qualité', 'mérite',
-                        'buisson d\'épines', 'homme toxique', 'maturité', 'déclin'],
+                        'buisson d épines', 'homme toxique', 'maturité', 'déclin'],
             'article_trigger': "UN HOMME DE QUALITÉ NE MÉRITE PAS UNE FEMME AMORTIE"
         }
     }
@@ -240,20 +240,36 @@ def is_greeting_or_intro(user_query: str) -> bool:
     """
     query_lower = user_query.lower().strip()
     
+    # Mots et phrases clés pour détecter les présentations
     greetings = [
         'bonjour', 'salut', 'hello', 'hey', 'hi', 'bonsoir', 'coucou',
         'qui es-tu', 'qui es tu', 'c est quoi', 'présente-toi', 'présente toi',
         'tu es qui', 'tu fais quoi', 'what are you', 'who are you',
-        'pourquoi toi', 'quelle différence', 'différence avec chatgpt',
-        'pourquoi pas chatgpt', 'en quoi tu es différent'
+        'pourquoi toi', 'pourquoi je devrais', 'quelle différence', 
+        'différence avec chatgpt', 'plutot qu une autre', 'plutôt qu une autre',
+        'pourquoi pas chatgpt', 'en quoi tu es différent', 'utiliser toi',
+        'autre ia', 'autre IA', 'chatgpt', 'chat gpt'
     ]
     
+    # Vérification des mots-clés
     for greeting in greetings:
         if greeting in query_lower:
             return True
     
+    # Détection de patterns spécifiques
+    presentation_patterns = [
+        ('pourquoi' in query_lower and 'utiliser' in query_lower),
+        ('pourquoi' in query_lower and 'toi' in query_lower),
+        ('quelle' in query_lower and 'différence' in query_lower),
+        ('autre' in query_lower and ('ia' in query_lower or 'IA' in user_query)),
+        ('plutot' in query_lower or 'plutôt' in query_lower),
+    ]
+    
+    if any(presentation_patterns):
+        return True
+    
     # Si le message est très court (moins de 20 caractères), probablement une salutation
-    if len(query_lower) < 20 and any(word in query_lower for word in ['salut', 'hello', 'bonjour', 'hey']):
+    if len(query_lower) < 20 and any(word in query_lower for word in ['salut', 'hello', 'bonjour', 'hey', 'hi']):
         return True
     
     return False
@@ -264,12 +280,17 @@ def get_system_prompt(user_query: str = "") -> str:
     """Génère un prompt avec contexte adaptatif et détection thématique."""
     name = "Ralph AI"
     
-    # Détection des salutations et demandes de présentation
+    # PRIORITÉ 1 : Détection des salutations et demandes de présentation
     if is_greeting_or_intro(user_query):
-        intro_instruction = """
-## MESSAGE DE PRÉSENTATION DÉTECTÉ
+        # Pour les présentations, on retourne un prompt spécial simplifié
+        print("👋 Salutation/Présentation détectée - Mode présentation activé")
+        return f"""Tu es {name}, assistant spécialisé dans la philosophie redpill masculine.
 
-L utilisateur te salue ou te demande qui tu es. Réponds avec CE MESSAGE EXACT (adapté à la langue de la question) :
+## INSTRUCTION UNIQUE : MESSAGE DE PRÉSENTATION
+
+L utilisateur te demande de te présenter ou te compare à d autres IA.
+
+Réponds UNIQUEMENT avec ce message EXACT (adapté à la langue de la question) :
 
 "Excellente question ! 🎯
 
@@ -287,12 +308,14 @@ Si vous en avez marre des conseils mièvres qui ne donnent aucun résultat, je s
 
 Prêt à avoir des réponses qui changent vraiment la donne ? 💪"
 
-N AJOUTE RIEN d autre, utilise CE MESSAGE tel quel (traduit si nécessaire).
+RÈGLES STRICTES :
+- N AJOUTE RIEN d autre au message
+- Utilise exactement ce texte
+- Traduis dans la langue de la question si nécessaire (anglais, italien, espagnol, etc.)
+- Ne mentionne PAS le document ou les relations homme-femme dans ce contexte
 """
-    else:
-        intro_instruction = ""
     
-    # Détection thématique
+    # PRIORITÉ 2 : Détection thématique pour les questions normales
     theme_detection = detect_query_theme(user_query)
     theme_instruction = ""
     
@@ -319,7 +342,7 @@ Utilise PRIORITAIREMENT le contenu de cet article pour répondre, même si le RA
 """
     
     # Génération du contexte RAG
-    if user_query and user_query.strip() and not is_greeting_or_intro(user_query):
+    if user_query and user_query.strip():
         try:
             relevant_context = RAG_SYSTEM.get_context_for_query(user_query, max_chars=10000)
             print(f"🎯 Contexte RAG généré: {len(relevant_context)} caractères")
@@ -330,8 +353,6 @@ Utilise PRIORITAIREMENT le contenu de cet article pour répondre, même si le RA
         relevant_context = "Pas de contexte nécessaire pour ce type de message"
     
     prompt = f"""Tu es {name}, assistant spécialisé dans la philosophie redpill masculine.
-
-{intro_instruction}
 
 {theme_instruction}
 
@@ -408,7 +429,6 @@ Réponds maintenant à la question du client en suivant TOUTES ces règles."""
     
     print(f"📏 Taille du prompt système : {len(prompt)} caractères")
     print(f"🎯 Thème détecté : {theme_detection['theme'] or 'Aucun'}")
-    print(f"👋 Salutation détectée : {'Oui' if is_greeting_or_intro(user_query) else 'Non'}")
     return prompt
 
 # ── Fonction de fallback ──────────────────────────────────────────────────────
