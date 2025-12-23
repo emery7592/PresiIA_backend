@@ -44,9 +44,9 @@ def health_check():
 def api_health_check():
     return {"status": "ok", "message": "API running"}
 
-# Interface Gradio
+# Interface Gradio - MONTÉ EN DEHORS DU IF __NAME__
 demo = gr.ChatInterface(gradio_chat, type="messages")
+app = gr.mount_gradio_app(app, demo, path="/gradio")
 
 if __name__ == "__main__":
-    app = gr.mount_gradio_app(app, demo, path="/gradio")
     uvicorn.run(app, host="0.0.0.0", port=7860)
