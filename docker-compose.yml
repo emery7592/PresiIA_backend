@@ -47,7 +47,8 @@ services:
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
-      - ./ssl:/etc/ssl/certs  # Pour HTTPS
+      - ./ssl:/etc/ssl/certs  # Pour HTTPS (anciens certificats)
+      - /etc/letsencrypt:/etc/letsencrypt:ro  # Pour clarity.redpill-ia.app
       - /dev/null:/etc/nginx/conf.d/default.conf
     depends_on:
       - app
