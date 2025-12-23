@@ -1,3 +1,8 @@
+from fastapi import APIRouter
+from fastapi.responses import HTMLResponse
+
+router = APIRouter(tags=["pages"])
+
 @router.get("/delete-account", response_class=HTMLResponse)
 async def delete_account_page():
     """Page de suppression de compte - Clarity"""
